@@ -11,10 +11,7 @@ export default function Layout() {
   const [pinMsg, setPinMsg] = useState(null)
   const [guardando, setGuardando] = useState(false)
 
-  function handleLogout() {
-    logout()
-    navigate('/login')
-  }
+  function handleLogout() { logout(); navigate('/login') }
 
   async function handleCambiarPin(e) {
     e.preventDefault()
@@ -44,6 +41,9 @@ export default function Layout() {
         <nav className="sidebar-nav">
           <div className="nav-section">General</div>
           <NavLink to="/" end className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+            <span className="icon">⚡</span> Conductivos
+          </NavLink>
+          <NavLink to="/calendario" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
             <span className="icon">📅</span> Calendario
           </NavLink>
           <NavLink to="/mis-guardias" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
@@ -52,7 +52,6 @@ export default function Layout() {
           <NavLink to="/solicitudes" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
             <span className="icon">🔄</span> Solicitudes
           </NavLink>
-
           {isAdmin && (
             <>
               <div className="nav-section">Administración</div>
@@ -82,7 +81,6 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      {/* Modal cambiar PIN */}
       {modalPin && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalPin(false)}>
           <div className="modal">
@@ -95,26 +93,11 @@ export default function Layout() {
                 {pinMsg && <div className={`alert alert-${pinMsg.tipo}`}>{pinMsg.texto}</div>}
                 <div className="form-group">
                   <label className="form-label">Nuevo PIN</label>
-                  <input
-                    className="form-control font-mono"
-                    type="password"
-                    value={pinNuevo}
-                    onChange={e => setPinNuevo(e.target.value)}
-                    placeholder="Mínimo 4 caracteres"
-                    maxLength={10}
-                    autoFocus
-                  />
+                  <input className="form-control font-mono" type="password" value={pinNuevo} onChange={e => setPinNuevo(e.target.value)} placeholder="Mínimo 4 caracteres" maxLength={10} autoFocus />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Repite el nuevo PIN</label>
-                  <input
-                    className="form-control font-mono"
-                    type="password"
-                    value={pinNuevo2}
-                    onChange={e => setPinNuevo2(e.target.value)}
-                    placeholder="Repite el PIN"
-                    maxLength={10}
-                  />
+                  <input className="form-control font-mono" type="password" value={pinNuevo2} onChange={e => setPinNuevo2(e.target.value)} placeholder="Repite el PIN" maxLength={10} />
                 </div>
               </div>
               <div className="modal-footer">

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
 import Login from './pages/Login'
+import Conductivos from './pages/Conductivos'
 import Calendario from './pages/Calendario'
 import MisGuardias from './pages/MisGuardias'
 import Solicitudes from './pages/Solicitudes'
@@ -24,7 +25,8 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route index element={<Calendario />} />
+        <Route index element={<Conductivos />} />
+        <Route path="calendario" element={<Calendario />} />
         <Route path="mis-guardias" element={<MisGuardias />} />
         <Route path="solicitudes" element={<Solicitudes />} />
         <Route path="admin/guardias" element={<ProtectedRoute adminOnly><AdminGuardias /></ProtectedRoute>} />
