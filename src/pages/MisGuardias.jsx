@@ -7,6 +7,25 @@ import { es } from 'date-fns/locale'
 
 function formatFecha(f) { return format(parseISO(f), "d 'de' MMMM yyyy", { locale: es }) }
 
+function abrirEnGoogleCalendar(guardia, nombreTecnico) {
+  // Google Calendar espera fechas en formato YYYYMMDD para eventos de todo el día
+  const inicio = guardia.lunes_inicio.replace(/-/g, '')
+  const fin = guardia.lunes_fin.replace(/-/g, '')
+  const tipoLabel = {
+    normal: 'Guardia',
+    festivo: 'Guardia Festivo',
+    navidad_nochebuena: 'Guardia Nochebuena',
+    navidad_navidad: 'Guardia Navidad',
+    navidad_reyes: 'Guardia Reyes'
+  }
+  const titulo = encodeURIComponent(`${tipoLabel[guardia.tipo] || 'Guardia'} — ${nombreTecnico}`)
+  const descripcion = encodeURIComponent(
+    `Semana de guardia asignada${guardia.festivo_nombre ? ' (' + guardia.festivo_nombre + ')' : ''}`
+  )
+  const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${titulo}&dates=${inicio}/${fin}&details=${descripcion}&trp=false`
+  window.open(url, '_blank')
+}
+
 export default function MisGuardias() {
   const { user } = useAuth()
   const [anio, setAnio] = useState(2026)
@@ -143,6 +162,7 @@ export default function MisGuardias() {
                         <th>Fin (Lunes)</th>
                         <th>Tipo</th>
                         <th>Festivo</th>
+                        <th>Google Cal</th>
                         <th>Acción</th>
                       </tr>
                     </thead>
@@ -154,6 +174,13 @@ export default function MisGuardias() {
                           <td>{formatFecha(g.lunes_fin)}</td>
                           <td>{tipoLabel[g.tipo] || g.tipo}</td>
                           <td>{g.festivo_nombre || <span className="text-muted">—</span>}</td>
+                          <td>
+                            <button
+                              className="btn btn-outline btn-icon btn-sm"
+                              title="Añadir a Google Calendar"
+                              onClick={() => abrirEnGoogleCalendar(g, user.nombre)}
+                            >📅</button>
+                          </td>
                           <td>
                             {!g.tipo?.startsWith('navidad') && (
                               <button className="btn btn-outline btn-sm" onClick={() => abrirModal(g)}>
