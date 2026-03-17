@@ -51,16 +51,20 @@ export default function Solicitudes() {
           .update({ tecnico_id: s.tecnico_receptor_id, estado: 'modificada' })
           .eq('id', s.semana_id)
 
-        // Si es sustitución, avanzar el puntero de la rueda de sustitución
+        // Si es sustitución, avanzar el puntero al siguiente del técnico receptor
         if (s.tipo_cambio === 'sustitucion') {
-          const { data: punteroData } = await supabase
-            .from('rueda_punteros')
-            .select('puntero')
-            .eq('tipo', 'sustitucion')
-            .eq('anio', anio)
-            .single()
+          // Obtener la rueda de sustitución ordenada
+          const { data: tecnicosRueda } = await supabase
+            .from('tecnicos')
+            .select('id, orden_rueda_sustitucion')
+            .eq('activo', true)
+            .neq('rol', 'admin')
+            .order('orden_rueda_sustitucion')
 
-          const nuevoPuntero = (punteroData?.puntero ?? 0) + 1
+          // Buscar posición del receptor en la rueda y apuntar al siguiente
+          const posReceptor = tecnicosRueda?.findIndex(t => t.id === s.tecnico_receptor_id) ?? -1
+          const nuevoPuntero = posReceptor >= 0 ? posReceptor + 1 : 0
+
           await supabase
             .from('rueda_punteros')
             .upsert({ tipo: 'sustitucion', anio, puntero: nuevoPuntero, updated_at: new Date().toISOString() })
