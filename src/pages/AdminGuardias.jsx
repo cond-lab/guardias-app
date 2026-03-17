@@ -16,6 +16,7 @@ export default function AdminGuardias() {
   const [estadisticas, setEstadisticas] = useState([])
   const [loading, setLoading] = useState(true)
   const [generando, setGenerando] = useState(false)
+  const [recalculando, setRecalculando] = useState(false)
   const [msg, setMsg] = useState(null)
   const [modalEditar, setModalEditar] = useState(null)
   const [tecnicoEdit, setTecnicoEdit] = useState('')
@@ -52,9 +53,7 @@ export default function AdminGuardias() {
     try {
       const { data: festivosDB } = await supabase.from('festivos').select('*').eq('anio', anio)
       const { data: tecnicosDB } = await supabase.from('tecnicos').select('*').eq('activo', true).order('orden_rueda_normal')
-
-      if (!tecnicosDB?.filter(t => t.rol !== 'admin').length)
-        throw new Error('No hay técnicos activos configurados')
+      if (!tecnicosDB?.filter(t => t.rol !== 'admin').length) throw new Error('No hay técnicos activos')
 
       let semanas = getLunesDelAnio(anio)
       semanas = marcarFestivos(semanas, festivosDB || [])
@@ -74,7 +73,6 @@ export default function AdminGuardias() {
 
       const { error } = await supabase.from('semanas_guardia').insert(rows)
       if (error) throw error
-
       setMsg({ tipo: 'success', texto: `✓ ${rows.length} semanas generadas para ${anio}` })
       cargar()
     } catch (err) {
@@ -101,6 +99,112 @@ export default function AdminGuardias() {
     cargar()
   }
 
+  /**
+   * Recalcula todas las semanas SIGUIENTES a la semana editada.
+   * 
+   * Lógica:
+   * 1. La semana editada se respeta tal cual (tecnico_id actual)
+   * 2. Determinamos en qué posición de la rueda queda ese técnico
+   *    (el siguiente en la rueda normal/festivo parte desde él)
+   * 3. Recalculamos y actualizamos en BD solo las semanas posteriores
+   */
+  async function recalcularDesde(semanaEditada) {
+    if (!window.confirm(
+      `¿Recalcular todas las semanas siguientes a partir del ${formatFecha(semanaEditada.lunes_fin)}?\n\nEsto reasignará automáticamente todas las semanas posteriores respetando la rueda.`
+    )) return
+
+    setRecalculando(true); setMsg(null)
+    try {
+      const { data: festivosDB } = await supabase.from('festivos').select('*').eq('anio', anio)
+      const { data: tecnicosDB } = await supabase.from('tecnicos').select('*').eq('activo', true)
+
+      // Todas las semanas del año ordenadas
+      const { data: todasSemanas } = await supabase
+        .from('semanas_guardia')
+        .select('*, tecnicos(nombre)')
+        .eq('anio', anio)
+        .order('lunes_inicio')
+
+      if (!todasSemanas?.length) throw new Error('No hay semanas generadas')
+
+      // Separar: semanas hasta la editada (inclusive) y semanas siguientes
+      const idxEditada = todasSemanas.findIndex(s => s.id === semanaEditada.id)
+      if (idxEditada < 0) throw new Error('No se encontró la semana editada')
+
+      const semanasAnteriores = todasSemanas.slice(0, idxEditada + 1) // incluye la editada
+      const semanasASiguientes = todasSemanas.slice(idxEditada + 1)   // las que recalculamos
+
+      if (!semanasASiguientes.length) {
+        setMsg({ tipo: 'warning', texto: 'Esta es la última semana del año, no hay nada que recalcular.' })
+        setRecalculando(false)
+        return
+      }
+
+      // Calcular punteros de rueda normal y festivo contando las semanas anteriores
+      const activos = tecnicosDB
+        .filter(t => t.activo && t.rol !== 'admin')
+        .sort((a, b) => a.orden_rueda_normal - b.orden_rueda_normal)
+      const activosFestivo = tecnicosDB
+        .filter(t => t.activo && t.rol !== 'admin')
+        .sort((a, b) => (a.orden_rueda_festivo ?? a.orden_rueda_normal) - (b.orden_rueda_festivo ?? b.orden_rueda_normal))
+
+      if (!activos.length) throw new Error('No hay técnicos activos')
+
+      const n = activos.length
+      const nF = activosFestivo.length
+
+      // Contar cuántas normales y cuántas festivos hay en las semanas anteriores (incluida la editada)
+      // para saber en qué posición de la rueda estamos
+      let cuentaNormal = 0
+      let cuentaFestivo = 0
+      for (const s of semanasAnteriores) {
+        if (s.tipo === 'normal') cuentaNormal++
+        else if (s.tipo === 'festivo') cuentaFestivo++
+        // navidad no consume rueda normal ni festivo
+      }
+
+      // El técnico asignado en la semana editada ya fue contado arriba.
+      // El siguiente puntero parte desde cuentaNormal y cuentaFestivo.
+      let idxNormal = cuentaNormal
+      let idxFestivo = cuentaFestivo
+
+      // Recalcular las semanas siguientes
+      const updates = []
+      for (const semana of semanasASiguientes) {
+        if (semana.tipo?.startsWith('navidad')) {
+          // Navidad no se toca
+          continue
+        }
+
+        let tecnicoId
+        if (semana.tiene_festivo) {
+          tecnicoId = activosFestivo[idxFestivo % nF]?.id || null
+          idxFestivo++
+        } else {
+          tecnicoId = activos[idxNormal % n]?.id || null
+          idxNormal++
+        }
+
+        updates.push({ id: semana.id, tecnico_id: tecnicoId, estado: 'pendiente' })
+      }
+
+      // Actualizar en BD en lotes
+      for (const u of updates) {
+        await supabase
+          .from('semanas_guardia')
+          .update({ tecnico_id: u.tecnico_id, estado: u.estado })
+          .eq('id', u.id)
+      }
+
+      setMsg({ tipo: 'success', texto: `✓ ${updates.length} semanas recalculadas correctamente` })
+      cargar()
+    } catch (err) {
+      setMsg({ tipo: 'danger', texto: err.message })
+    } finally {
+      setRecalculando(false)
+    }
+  }
+
   function exportarExcel() {
     const data = guardias.map((g, i) => ({
       '#': i + 1,
@@ -124,7 +228,6 @@ export default function AdminGuardias() {
     doc.setFontSize(9)
     doc.setTextColor(120)
     doc.text(`Generado el ${format(new Date(), "d 'de' MMMM yyyy", { locale: es })}`, 14, 23)
-
     autoTable(doc, {
       startY: 28,
       head: [['#', 'Inicio', 'Fin', 'Técnico', 'Tipo', 'Festivo']],
@@ -138,18 +241,22 @@ export default function AdminGuardias() {
       ]),
       styles: { fontSize: 8 },
       headStyles: { fillColor: [27, 58, 107] },
-      rowPageBreak: 'auto',
       didParseCell: (data) => {
         const tipo = guardias[data.row.index]?.tipo
         if (tipo === 'festivo') data.cell.styles.fillColor = [255, 251, 235]
         if (tipo?.startsWith('navidad')) data.cell.styles.fillColor = [240, 255, 244]
       }
     })
-
     doc.save(`guardias_${anio}.pdf`)
   }
 
-  const tipoLabel = { normal: 'Normal', festivo: '🏖 Festivo', navidad_nochebuena: '🎄 Nochebuena', navidad_navidad: '🎅 Navidad', navidad_reyes: '👑 Reyes' }
+  const tipoLabel = {
+    normal: 'Normal',
+    festivo: '🏖 Festivo',
+    navidad_nochebuena: '🎄 Nochebuena',
+    navidad_navidad: '🎅 Navidad',
+    navidad_reyes: '👑 Reyes'
+  }
 
   return (
     <>
@@ -167,6 +274,12 @@ export default function AdminGuardias() {
 
       <div className="page-body">
         {msg && <div className={`alert alert-${msg.tipo}`}>{msg.texto}</div>}
+        {recalculando && (
+          <div className="alert alert-info">
+            <span className="spinner" style={{ width: 14, height: 14, marginRight: 8 }} />
+            Recalculando semanas... un momento.
+          </div>
+        )}
 
         {/* Acciones */}
         <div className="card mb-4">
@@ -185,12 +298,12 @@ export default function AdminGuardias() {
           </div>
           {guardias.length > 0 && (
             <div className="card-body" style={{ borderTop: '1px solid var(--gris-3)', paddingTop: 12 }}>
-              <span className="text-sm text-muted">✓ {guardias.length} semanas generadas para {anio}. Para regenerar, elimina primero el año.</span>
+              <span className="text-sm text-muted">✓ {guardias.length} semanas generadas para {anio}. Para regenerar desde cero, elimina primero el año.</span>
             </div>
           )}
         </div>
 
-        {/* Estadísticas equidad */}
+        {/* Estadísticas */}
         {estadisticas.length > 0 && (
           <div className="card mb-4">
             <div className="card-header">Distribución por técnico</div>
@@ -219,7 +332,7 @@ export default function AdminGuardias() {
                         <td className="font-mono"><strong>{s.total}</strong></td>
                         <td style={{ width: 160 }}>
                           <div style={{ background: 'var(--gris-2)', borderRadius: 4, height: 8 }}>
-                            <div style={{ background: 'var(--azul)', width: `${pct}%`, height: 8, borderRadius: 4, transition: 'width 0.3s' }} />
+                            <div style={{ background: 'var(--azul)', width: `${pct}%`, height: 8, borderRadius: 4 }} />
                           </div>
                         </td>
                       </tr>
@@ -238,7 +351,12 @@ export default function AdminGuardias() {
           <div className="alert alert-info">No hay guardias para {anio}. Usa el botón "Generar guardias" para crear la rueda del año.</div>
         ) : (
           <div className="card">
-            <div className="card-header">Todas las semanas — {anio}</div>
+            <div className="card-header">
+              Todas las semanas — {anio}
+              <span className="text-sm text-muted" style={{ fontWeight: 400 }}>
+                Edita un técnico y usa ↺ para recalcular el resto del año desde esa semana
+              </span>
+            </div>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -251,6 +369,7 @@ export default function AdminGuardias() {
                     <th>Festivo</th>
                     <th>Estado</th>
                     <th>Editar</th>
+                    <th>Recalcular</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -266,7 +385,22 @@ export default function AdminGuardias() {
                         <span className={`badge ${g.estado === 'modificada' ? 'badge-pendiente' : 'badge-normal'}`}>{g.estado}</span>
                       </td>
                       <td>
-                        <button className="btn btn-outline btn-icon btn-sm" title="Editar" onClick={() => { setModalEditar(g); setTecnicoEdit(g.tecnico_id || ''); setNotasEdit(g.notas || '') }}>✏️</button>
+                        <button
+                          className="btn btn-outline btn-icon btn-sm"
+                          title="Editar técnico"
+                          onClick={() => { setModalEditar(g); setTecnicoEdit(g.tecnico_id || ''); setNotasEdit(g.notas || '') }}
+                        >✏️</button>
+                      </td>
+                      <td>
+                        {/* Solo mostrar recalcular si no es la última semana y no es navidad */}
+                        {!g.tipo?.startsWith('navidad') && i < guardias.length - 1 && (
+                          <button
+                            className="btn btn-warning btn-icon btn-sm"
+                            title="Recalcular semanas siguientes desde aquí"
+                            disabled={recalculando}
+                            onClick={() => recalcularDesde(g)}
+                          >↺</button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -289,11 +423,16 @@ export default function AdminGuardias() {
               <div className="alert alert-info mb-3">
                 <strong>Semana:</strong> {formatFecha(modalEditar.lunes_inicio)} → {formatFecha(modalEditar.lunes_fin)}
               </div>
+              <div className="alert alert-warning mb-3" style={{ fontSize: 12 }}>
+                Tras guardar, usa el botón <strong>↺</strong> en esa fila para recalcular el resto del año desde esta semana.
+              </div>
               <div className="form-group">
                 <label className="form-label">Técnico asignado</label>
                 <select className="form-control" value={tecnicoEdit} onChange={e => setTecnicoEdit(e.target.value)}>
                   <option value="">— Sin asignar —</option>
-                  {tecnicos.filter(t => t.rol !== 'admin').map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                  {tecnicos.filter(t => t.rol !== 'admin').map(t => (
+                    <option key={t.id} value={t.id}>{t.nombre}</option>
+                  ))}
                 </select>
               </div>
               <div className="form-group">
