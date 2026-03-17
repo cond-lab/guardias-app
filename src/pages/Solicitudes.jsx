@@ -23,7 +23,7 @@ export default function Solicitudes() {
       .from('solicitudes_cambio')
       .select(`
         *,
-        semanas_guardia(lunes_inicio, lunes_fin, tipo),
+        semanas_guardia(lunes_inicio, lunes_fin, tipo, anio),
         solicitante:tecnico_solicitante_id(nombre),
         receptor:tecnico_receptor_id(nombre)
       `)
@@ -42,18 +42,29 @@ export default function Solicitudes() {
     setProcesando(true); setMsg(null)
     try {
       const s = modalResolver
+      const anio = s.semanas_guardia?.anio || 2026
 
-      // Si aprobada e intercambio: hacer swap de técnico en la semana
-      if (estado === 'aprobada' && s.tipo_cambio === 'intercambio' && s.tecnico_receptor_id) {
+      if (estado === 'aprobada') {
+        // Asignar la guardia al técnico receptor
         await supabase
           .from('semanas_guardia')
           .update({ tecnico_id: s.tecnico_receptor_id, estado: 'modificada' })
           .eq('id', s.semana_id)
-      } else if (estado === 'aprobada' && s.tipo_cambio === 'reasignacion') {
-        await supabase
-          .from('semanas_guardia')
-          .update({ tecnico_id: null, estado: 'modificada' })
-          .eq('id', s.semana_id)
+
+        // Si es sustitución, avanzar el puntero de la rueda de sustitución
+        if (s.tipo_cambio === 'sustitucion') {
+          const { data: punteroData } = await supabase
+            .from('rueda_punteros')
+            .select('puntero')
+            .eq('tipo', 'sustitucion')
+            .eq('anio', anio)
+            .single()
+
+          const nuevoPuntero = (punteroData?.puntero ?? 0) + 1
+          await supabase
+            .from('rueda_punteros')
+            .upsert({ tipo: 'sustitucion', anio, puntero: nuevoPuntero, updated_at: new Date().toISOString() })
+        }
       }
 
       await supabase
@@ -73,6 +84,12 @@ export default function Solicitudes() {
   const estadoBadge = (e) => {
     const map = { pendiente: 'badge-pendiente', aprobada: 'badge-aprobada', rechazada: 'badge-rechazada' }
     return <span className={`badge ${map[e]}`}>{e}</span>
+  }
+
+  const tipoCambioLabel = (t) => {
+    if (t === 'sustitucion') return '🔄 Sustitución'
+    if (t === 'intercambio') return '↔️ Intercambio'
+    return t
   }
 
   const pendientes = solicitudes.filter(s => s.estado === 'pendiente').length
@@ -95,18 +112,18 @@ export default function Solicitudes() {
         {loading ? (
           <div className="loading-center"><div className="spinner" /><span>Cargando...</span></div>
         ) : solicitudes.length === 0 ? (
-          <div className="alert alert-info">No hay solicitudes {isAdmin ? '' : 'tuyas '}registradas.</div>
+          <div className="alert alert-info">No hay solicitudes registradas.</div>
         ) : (
           <div className="card">
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Fecha solicitud</th>
-                    <th>Semana</th>
+                    <th>Fecha</th>
+                    <th>Semana guardia</th>
                     <th>Solicitante</th>
                     <th>Tipo</th>
-                    <th>Receptor</th>
+                    <th>Sustituto propuesto</th>
                     <th>Motivo</th>
                     <th>Estado</th>
                     {isAdmin && <th>Acción</th>}
@@ -117,10 +134,12 @@ export default function Solicitudes() {
                     <tr key={s.id}>
                       <td className="text-sm text-muted">{formatFecha(s.created_at)}</td>
                       <td className="text-sm">
-                        {s.semanas_guardia ? `${formatFecha(s.semanas_guardia.lunes_inicio)} → ${formatFecha(s.semanas_guardia.lunes_fin)}` : '—'}
+                        {s.semanas_guardia
+                          ? `${formatFecha(s.semanas_guardia.lunes_inicio)} → ${formatFecha(s.semanas_guardia.lunes_fin)}`
+                          : '—'}
                       </td>
                       <td><strong>{s.solicitante?.nombre || '—'}</strong></td>
-                      <td>{s.tipo_cambio === 'intercambio' ? '🔄 Intercambio' : '📋 Reasignación'}</td>
+                      <td>{tipoCambioLabel(s.tipo_cambio)}</td>
                       <td>{s.receptor?.nombre || <span className="text-muted">—</span>}</td>
                       <td style={{ maxWidth: 200, wordBreak: 'break-word' }}>{s.motivo}</td>
                       <td>{estadoBadge(s.estado)}</td>
@@ -132,7 +151,7 @@ export default function Solicitudes() {
                             </button>
                           )}
                           {s.estado !== 'pendiente' && s.respuesta_admin && (
-                            <span className="text-sm text-muted" title={s.respuesta_admin}>💬 Resp.</span>
+                            <span className="text-sm text-muted" title={s.respuesta_admin}>💬</span>
                           )}
                         </td>
                       )}
@@ -157,11 +176,18 @@ export default function Solicitudes() {
               {msg && <div className={`alert alert-${msg.tipo}`}>{msg.texto}</div>}
               <div className="alert alert-info mb-3">
                 <strong>Solicitante:</strong> {modalResolver.solicitante?.nombre}<br />
-                <strong>Semana:</strong> {modalResolver.semanas_guardia ? `${formatFecha(modalResolver.semanas_guardia.lunes_inicio)} → ${formatFecha(modalResolver.semanas_guardia.lunes_fin)}` : '—'}<br />
-                <strong>Tipo:</strong> {modalResolver.tipo_cambio}<br />
+                <strong>Semana:</strong> {modalResolver.semanas_guardia
+                  ? `${formatFecha(modalResolver.semanas_guardia.lunes_inicio)} → ${formatFecha(modalResolver.semanas_guardia.lunes_fin)}`
+                  : '—'}<br />
+                <strong>Tipo:</strong> {tipoCambioLabel(modalResolver.tipo_cambio)}<br />
+                <strong>Sustituto propuesto:</strong> {modalResolver.receptor?.nombre || '—'}<br />
                 <strong>Motivo:</strong> {modalResolver.motivo}
-                {modalResolver.receptor && <><br /><strong>Receptor:</strong> {modalResolver.receptor.nombre}</>}
               </div>
+              {modalResolver.tipo_cambio === 'sustitucion' && (
+                <div className="alert alert-warning mb-3">
+                  ⚠️ Si apruebas, la guardia pasará a <strong>{modalResolver.receptor?.nombre}</strong> y la rueda de sustitución avanzará una posición.
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">Respuesta / Comentario (opcional)</label>
                 <textarea

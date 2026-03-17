@@ -1,26 +1,45 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
 
-const FORM_VACIO = { nombre: '', email: '', pin: '', rol: 'tecnico', orden_rueda_normal: 0, orden_rueda_navidad: 0 }
+const FORM_VACIO = { nombre: '', email: '', pin: '', rol: 'tecnico', orden_rueda_normal: 0, orden_rueda_festivo: 0, orden_rueda_navidad: 0, orden_rueda_sustitucion: 0 }
+
+const RUEDAS = [
+  { key: 'orden_rueda_normal',       label: 'Rueda Normal',        emoji: '📅' },
+  { key: 'orden_rueda_festivo',      label: 'Rueda Festivos',      emoji: '🏖' },
+  { key: 'orden_rueda_navidad',      label: 'Rueda Navidad',       emoji: '🎄' },
+  { key: 'orden_rueda_sustitucion',  label: 'Rueda Sustitución',   emoji: '🔄' },
+]
+
+const NAVIDAD_LABELS = ['🎄 Nochebuena', '🎅 Navidad', '👑 Reyes']
 
 export default function AdminTecnicos() {
   const [tecnicos, setTecnicos] = useState([])
+  const [punteroSust, setPunteroSust] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [modal, setModal] = useState(null) // null | 'nuevo' | tecnico
+  const [modal, setModal] = useState(null)
   const [form, setForm] = useState(FORM_VACIO)
   const [guardando, setGuardando] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [ruedaActiva, setRuedaActiva] = useState('orden_rueda_normal')
 
   useEffect(() => { cargar() }, [])
 
   async function cargar() {
     setLoading(true)
-    const { data } = await supabase.from('tecnicos').select('*').order('orden_rueda_normal')
-    setTecnicos(data || [])
+    const [{ data: t }, { data: p }] = await Promise.all([
+      supabase.from('tecnicos').select('*').order('orden_rueda_normal'),
+      supabase.from('rueda_punteros').select('puntero').eq('tipo', 'sustitucion').eq('anio', 2026).single()
+    ])
+    setTecnicos(t || [])
+    setPunteroSust(p?.puntero || 0)
     setLoading(false)
   }
 
-  function abrirNuevo() { setForm({ ...FORM_VACIO, orden_rueda_normal: tecnicos.length, orden_rueda_navidad: tecnicos.length }); setModal('nuevo'); setMsg(null) }
+  function abrirNuevo() {
+    const n = tecnicos.filter(t => t.rol !== 'admin').length
+    setForm({ ...FORM_VACIO, orden_rueda_normal: n, orden_rueda_festivo: n, orden_rueda_navidad: n, orden_rueda_sustitucion: n })
+    setModal('nuevo'); setMsg(null)
+  }
   function abrirEditar(t) { setForm({ ...t }); setModal(t); setMsg(null) }
 
   async function guardar() {
@@ -48,15 +67,12 @@ export default function AdminTecnicos() {
     cargar()
   }
 
-  // Mover en rueda normal
-  async function moverRueda(tipo, id, direccion) {
-    const campo = tipo === 'normal' ? 'orden_rueda_normal' : 'orden_rueda_navidad'
-    const lista = [...tecnicos].filter(t => t.rol !== 'admin').sort((a, b) => a[campo] - b[campo])
+  async function moverRueda(campo, id, dir) {
+    const lista = [...tecnicos].filter(t => t.rol !== 'admin').sort((a, b) => (a[campo] ?? 0) - (b[campo] ?? 0))
     const idx = lista.findIndex(t => t.id === id)
     if (idx < 0) return
-    const nuevoIdx = idx + direccion
+    const nuevoIdx = idx + dir
     if (nuevoIdx < 0 || nuevoIdx >= lista.length) return
-    // Swap
     const a = lista[idx], b = lista[nuevoIdx]
     await Promise.all([
       supabase.from('tecnicos').update({ [campo]: b[campo] }).eq('id', a.id),
@@ -65,15 +81,28 @@ export default function AdminTecnicos() {
     cargar()
   }
 
-  const tecnicosActivos = tecnicos.filter(t => t.rol !== 'admin' && t.activo).sort((a, b) => a.orden_rueda_normal - b.orden_rueda_normal)
-  const tecnicosNavidad = tecnicos.filter(t => t.rol !== 'admin' && t.activo).sort((a, b) => a.orden_rueda_navidad - b.orden_rueda_navidad)
+  async function resetearPuntero() {
+    if (!window.confirm('¿Resetear el puntero de la rueda de sustitución a 0?')) return
+    await supabase.from('rueda_punteros').upsert({ tipo: 'sustitucion', anio: 2026, puntero: 0, updated_at: new Date().toISOString() })
+    setPunteroSust(0)
+  }
+
+  const tecnicosPorRueda = (campo) =>
+    tecnicos.filter(t => t.rol !== 'admin' && t.activo).sort((a, b) => (a[campo] ?? 0) - (b[campo] ?? 0))
+
+  const ruedaActual = RUEDAS.find(r => r.key === ruedaActiva)
+  const listaTecnicos = tecnicosPorRueda(ruedaActiva)
+
+  // Calcular quién es el siguiente en sustitución
+  const tecnicosSust = tecnicosPorRueda('orden_rueda_sustitucion')
+  const tecnicoEnTurno = tecnicosSust.length ? tecnicosSust[punteroSust % tecnicosSust.length] : null
 
   return (
     <>
       <div className="page-header">
         <div>
           <h2>Gestión de Técnicos</h2>
-          <p>Alta, baja y orden de la rueda</p>
+          <p>Alta, baja y orden de las ruedas</p>
         </div>
         <button className="btn btn-primary" onClick={abrirNuevo}>+ Nuevo técnico</button>
       </div>
@@ -81,46 +110,68 @@ export default function AdminTecnicos() {
       <div className="page-body">
         {msg && !modal && <div className={`alert alert-${msg.tipo}`}>{msg.texto}</div>}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
-          {/* Rueda normal */}
-          <div className="card">
-            <div className="card-header">Rueda Normal (orden de guardia)</div>
-            <div>
-              {tecnicosActivos.length === 0 ? (
-                <div className="card-body text-muted">No hay técnicos activos</div>
-              ) : tecnicosActivos.map((t, i) => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', padding: '8px 14px', borderBottom: '1px solid var(--gris-2)', gap: 10 }}>
-                  <span className="font-mono text-muted" style={{ width: 24, textAlign: 'right', fontSize: 12 }}>{i + 1}</span>
-                  <span style={{ flex: 1, fontWeight: 500 }}>{t.nombre}</span>
-                  <button className="btn btn-outline btn-icon btn-sm" onClick={() => moverRueda('normal', t.id, -1)} disabled={i === 0}>▲</button>
-                  <button className="btn btn-outline btn-icon btn-sm" onClick={() => moverRueda('normal', t.id, 1)} disabled={i === tecnicosActivos.length - 1}>▼</button>
-                </div>
+        {/* Panel ruedas */}
+        <div className="card mb-4">
+          <div className="card-header">
+            <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+              {RUEDAS.map(r => (
+                <button
+                  key={r.key}
+                  className={`btn btn-sm ${ruedaActiva === r.key ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setRuedaActiva(r.key)}
+                >
+                  {r.emoji} {r.label}
+                </button>
               ))}
             </div>
           </div>
 
-          {/* Rueda navidad */}
-          <div className="card">
-            <div className="card-header">Rueda Navidad (Nochebuena → Navidad → Reyes)</div>
-            <div>
-              {tecnicosNavidad.length === 0 ? (
-                <div className="card-body text-muted">No hay técnicos activos</div>
-              ) : tecnicosNavidad.map((t, i) => (
-                <div key={t.id} style={{ display: 'flex', alignItems: 'center', padding: '8px 14px', borderBottom: '1px solid var(--gris-2)', gap: 10 }}>
-                  <span className="font-mono text-muted" style={{ width: 24, textAlign: 'right', fontSize: 12 }}>{i + 1}</span>
-                  <span style={{ flex: 1, fontWeight: 500 }}>{t.nombre}</span>
-                  <span style={{ fontSize: 11, color: 'var(--navidad)' }}>
-                    {i === 0 ? '🎄 Nochebuena' : i === 1 ? '🎅 Navidad' : i === 2 ? '👑 Reyes' : ''}
-                  </span>
-                  <button className="btn btn-outline btn-icon btn-sm" onClick={() => moverRueda('navidad', t.id, -1)} disabled={i === 0}>▲</button>
-                  <button className="btn btn-outline btn-icon btn-sm" onClick={() => moverRueda('navidad', t.id, 1)} disabled={i === tecnicosNavidad.length - 1}>▼</button>
+          <div>
+            {/* Info especial según rueda */}
+            {ruedaActiva === 'orden_rueda_navidad' && (
+              <div className="alert alert-info" style={{ margin: '12px 16px 0' }}>
+                Los primeros 3 técnicos se asignan a Nochebuena, Navidad y Reyes respectivamente.
+              </div>
+            )}
+            {ruedaActiva === 'orden_rueda_sustitucion' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 0' }}>
+                <div className="alert alert-info" style={{ margin: 0, flex: 1 }}>
+                  <strong>Turno actual:</strong> {tecnicoEnTurno ? <strong> {tecnicoEnTurno.nombre}</strong> : ' —'}
+                  <span className="text-muted" style={{ marginLeft: 8 }}>(puntero: {punteroSust})</span>
                 </div>
-              ))}
-            </div>
+                <button className="btn btn-warning btn-sm" style={{ marginLeft: 12 }} onClick={resetearPuntero}>
+                  ↺ Resetear puntero
+                </button>
+              </div>
+            )}
+
+            {listaTecnicos.length === 0 ? (
+              <div className="card-body text-muted">No hay técnicos activos</div>
+            ) : listaTecnicos.map((t, i) => (
+              <div key={t.id} style={{
+                display: 'flex', alignItems: 'center', padding: '9px 16px',
+                borderBottom: '1px solid var(--gris-2)', gap: 10,
+                background: ruedaActiva === 'orden_rueda_sustitucion' && t.id === tecnicoEnTurno?.id
+                  ? 'var(--azul-claro)' : undefined
+              }}>
+                <span className="font-mono text-muted" style={{ width: 24, textAlign: 'right', fontSize: 12 }}>{i + 1}</span>
+                <span style={{ flex: 1, fontWeight: 500 }}>
+                  {t.nombre}
+                  {ruedaActiva === 'orden_rueda_sustitucion' && t.id === tecnicoEnTurno?.id &&
+                    <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--azul)', fontWeight: 700 }}>← En turno</span>
+                  }
+                </span>
+                {ruedaActiva === 'orden_rueda_navidad' && i < 3 && (
+                  <span style={{ fontSize: 11, color: 'var(--navidad)', marginRight: 8 }}>{NAVIDAD_LABELS[i]}</span>
+                )}
+                <button className="btn btn-outline btn-icon btn-sm" onClick={() => moverRueda(ruedaActiva, t.id, -1)} disabled={i === 0}>▲</button>
+                <button className="btn btn-outline btn-icon btn-sm" onClick={() => moverRueda(ruedaActiva, t.id, 1)} disabled={i === listaTecnicos.length - 1}>▼</button>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Tabla todos */}
+        {/* Tabla todos los técnicos */}
         {loading ? (
           <div className="loading-center"><div className="spinner" /></div>
         ) : (
@@ -134,8 +185,10 @@ export default function AdminTecnicos() {
                     <th>Email</th>
                     <th>PIN</th>
                     <th>Rol</th>
-                    <th>Pos. Normal</th>
-                    <th>Pos. Navidad</th>
+                    <th>📅 Normal</th>
+                    <th>🏖 Festivo</th>
+                    <th>🎄 Navidad</th>
+                    <th>🔄 Sust.</th>
                     <th>Estado</th>
                     <th>Acciones</th>
                   </tr>
@@ -147,14 +200,14 @@ export default function AdminTecnicos() {
                       <td className="text-sm text-muted">{t.email || '—'}</td>
                       <td className="font-mono text-sm">{t.pin}</td>
                       <td>{t.rol === 'admin' ? <span className="badge badge-navidad">Admin</span> : <span className="badge badge-normal">Técnico</span>}</td>
-                      <td className="font-mono text-muted">{t.rol !== 'admin' ? t.orden_rueda_normal + 1 : '—'}</td>
-                      <td className="font-mono text-muted">{t.rol !== 'admin' ? t.orden_rueda_navidad + 1 : '—'}</td>
-                      <td>
-                        <span className={`badge ${t.activo ? 'badge-aprobada' : 'badge-rechazada'}`}>{t.activo ? 'Activo' : 'Inactivo'}</span>
-                      </td>
+                      <td className="font-mono text-muted text-sm">{t.rol !== 'admin' ? (t.orden_rueda_normal ?? 0) + 1 : '—'}</td>
+                      <td className="font-mono text-muted text-sm">{t.rol !== 'admin' ? (t.orden_rueda_festivo ?? 0) + 1 : '—'}</td>
+                      <td className="font-mono text-muted text-sm">{t.rol !== 'admin' ? (t.orden_rueda_navidad ?? 0) + 1 : '—'}</td>
+                      <td className="font-mono text-muted text-sm">{t.rol !== 'admin' ? (t.orden_rueda_sustitucion ?? 0) + 1 : '—'}</td>
+                      <td><span className={`badge ${t.activo ? 'badge-aprobada' : 'badge-rechazada'}`}>{t.activo ? 'Activo' : 'Inactivo'}</span></td>
                       <td>
                         <div className="flex gap-2">
-                          <button className="btn btn-outline btn-sm" onClick={() => abrirEditar(t)}>✏️ Editar</button>
+                          <button className="btn btn-outline btn-sm" onClick={() => abrirEditar(t)}>✏️</button>
                           {t.rol !== 'admin' && (
                             <button className={`btn btn-sm ${t.activo ? 'btn-warning' : 'btn-success'}`} onClick={() => toggleActivo(t)}>
                               {t.activo ? 'Desactivar' : 'Activar'}
@@ -171,7 +224,7 @@ export default function AdminTecnicos() {
         )}
       </div>
 
-      {/* Modal crear/editar */}
+      {/* Modal */}
       {modal !== null && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
           <div className="modal">
@@ -201,14 +254,14 @@ export default function AdminTecnicos() {
                 </select>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">Posición rueda normal</label>
-                  <input className="form-control" type="number" min={0} value={form.orden_rueda_normal} onChange={e => setForm(p => ({ ...p, orden_rueda_normal: +e.target.value }))} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Posición rueda navidad</label>
-                  <input className="form-control" type="number" min={0} value={form.orden_rueda_navidad} onChange={e => setForm(p => ({ ...p, orden_rueda_navidad: +e.target.value }))} />
-                </div>
+                {RUEDAS.map(r => (
+                  <div key={r.key} className="form-group">
+                    <label className="form-label">{r.emoji} {r.label}</label>
+                    <input className="form-control" type="number" min={0}
+                      value={form[r.key] ?? 0}
+                      onChange={e => setForm(p => ({ ...p, [r.key]: +e.target.value }))} />
+                  </div>
+                ))}
               </div>
             </div>
             <div className="modal-footer">

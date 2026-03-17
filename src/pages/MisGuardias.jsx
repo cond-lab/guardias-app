@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../context/AuthContext'
+import { getTecnicoSustitucion } from '../utils/asignacion'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 
@@ -11,9 +12,10 @@ export default function MisGuardias() {
   const [anio, setAnio] = useState(2026)
   const [guardias, setGuardias] = useState([])
   const [tecnicos, setTecnicos] = useState([])
+  const [punteroSustitucion, setPunteroSustitucion] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [modal, setModal] = useState(null) // semana seleccionada para cambio
-  const [form, setForm] = useState({ tipo_cambio: 'intercambio', tecnico_receptor_id: '', motivo: '' })
+  const [modal, setModal] = useState(null)
+  const [form, setForm] = useState({ tipo_cambio: 'sustitucion', tecnico_receptor_id: '', motivo: '' })
   const [enviando, setEnviando] = useState(false)
   const [msg, setMsg] = useState(null)
 
@@ -21,20 +23,32 @@ export default function MisGuardias() {
 
   async function cargar() {
     setLoading(true)
-    const [{ data: g }, { data: t }] = await Promise.all([
+    const [{ data: g }, { data: t }, { data: p }] = await Promise.all([
       supabase.from('semanas_guardia').select('*').eq('tecnico_id', user.id).eq('anio', anio).order('lunes_inicio'),
-      supabase.from('tecnicos').select('id,nombre').eq('activo', true).neq('id', user.id).neq('rol','admin')
+      supabase.from('tecnicos').select('*').eq('activo', true).order('orden_rueda_sustitucion'),
+      supabase.from('rueda_punteros').select('puntero').eq('tipo', 'sustitucion').eq('anio', anio).single()
     ])
     setGuardias(g || [])
     setTecnicos(t || [])
+    setPunteroSustitucion(p?.puntero || 0)
     setLoading(false)
+  }
+
+  function abrirModal(semana) {
+    // Calcular quién le toca en la rueda de sustitución
+    const tecnicoTurno = getTecnicoSustitucion(tecnicos, punteroSustitucion)
+    // No preseleccionar al propio solicitante ni al que ya tiene esa guardia
+    const tecnicoPresel = (tecnicoTurno?.id !== user.id) ? tecnicoTurno?.id : ''
+    setForm({ tipo_cambio: 'sustitucion', tecnico_receptor_id: tecnicoPresel || '', motivo: '' })
+    setModal(semana)
+    setMsg(null)
   }
 
   async function solicitarCambio() {
     if (!form.motivo.trim()) { setMsg({ tipo: 'danger', texto: 'El motivo es obligatorio' }); return }
+    if (!form.tecnico_receptor_id) { setMsg({ tipo: 'danger', texto: 'Debes seleccionar un técnico' }); return }
     setEnviando(true); setMsg(null)
     try {
-      // Verificar si ya hay solicitud pendiente
       const { data: pend } = await supabase
         .from('solicitudes_cambio')
         .select('id')
@@ -45,19 +59,29 @@ export default function MisGuardias() {
       const { error } = await supabase.from('solicitudes_cambio').insert({
         semana_id: modal.id,
         tecnico_solicitante_id: user.id,
-        tecnico_receptor_id: form.tecnico_receptor_id || null,
-        tipo_cambio: form.tipo_cambio,
+        tecnico_receptor_id: form.tecnico_receptor_id,
+        tipo_cambio: 'sustitucion',
         motivo: form.motivo
       })
       if (error) throw error
-      setMsg({ tipo: 'success', texto: 'Solicitud enviada correctamente. El administrador la revisará.' })
-      setTimeout(() => { setModal(null); setMsg(null); setForm({ tipo_cambio: 'intercambio', tecnico_receptor_id: '', motivo: '' }) }, 2000)
+      setMsg({ tipo: 'success', texto: 'Solicitud enviada. El administrador la revisará.' })
+      setTimeout(() => { setModal(null); setMsg(null); cargar() }, 2000)
     } catch (err) {
       setMsg({ tipo: 'danger', texto: err.message })
     } finally {
       setEnviando(false)
     }
   }
+
+  // Técnico en turno de sustitución
+  const tecnicoEnTurno = getTecnicoSustitucion(tecnicos, punteroSustitucion)
+  const tecnicosSinYo = tecnicos.filter(t => t.id !== user.id && t.rol !== 'admin')
+  // Ordenar: el del turno primero, luego el resto
+  const tecnicosOrdenados = tecnicosSinYo.sort((a, b) => {
+    if (a.id === tecnicoEnTurno?.id) return -1
+    if (b.id === tecnicoEnTurno?.id) return 1
+    return (a.orden_rueda_sustitucion ?? 0) - (b.orden_rueda_sustitucion ?? 0)
+  })
 
   const tipoLabel = { normal: 'Normal', festivo: '🏖 Festivo', navidad_nochebuena: '🎄 Nochebuena', navidad_navidad: '🎅 Navidad', navidad_reyes: '👑 Reyes' }
 
@@ -69,7 +93,7 @@ export default function MisGuardias() {
           <p>Tus semanas de guardia asignadas</p>
         </div>
         <select className="form-control" style={{ width: 'auto' }} value={anio} onChange={e => setAnio(+e.target.value)}>
-          {[2025,2026,2027].map(a => <option key={a}>{a}</option>)}
+          {[2025, 2026, 2027].map(a => <option key={a}>{a}</option>)}
         </select>
       </div>
 
@@ -96,6 +120,14 @@ export default function MisGuardias() {
                 <div className="stat-label">Normales</div>
               </div>
             </div>
+
+            {/* Info rueda sustitución */}
+            {tecnicoEnTurno && (
+              <div className="alert alert-info mb-4">
+                <strong>Rueda de sustitución:</strong> El técnico en turno actualmente es <strong>{tecnicoEnTurno.nombre}</strong>.
+                Si solicitas un cambio, se le asignará a él por defecto (puedes cambiarlo).
+              </div>
+            )}
 
             {guardias.length === 0 ? (
               <div className="alert alert-info">No tienes guardias asignadas para {anio}.</div>
@@ -124,7 +156,7 @@ export default function MisGuardias() {
                           <td>{g.festivo_nombre || <span className="text-muted">—</span>}</td>
                           <td>
                             {!g.tipo?.startsWith('navidad') && (
-                              <button className="btn btn-outline btn-sm" onClick={() => { setModal(g); setMsg(null) }}>
+                              <button className="btn btn-outline btn-sm" onClick={() => abrirModal(g)}>
                                 🔄 Solicitar cambio
                               </button>
                             )}
@@ -153,22 +185,28 @@ export default function MisGuardias() {
               <div className="alert alert-info" style={{ marginBottom: 14 }}>
                 <strong>Semana:</strong> {formatFecha(modal.lunes_inicio)} → {formatFecha(modal.lunes_fin)}
               </div>
+
               <div className="form-group">
-                <label className="form-label">Tipo de cambio</label>
-                <select className="form-control" value={form.tipo_cambio} onChange={e => setForm(p => ({ ...p, tipo_cambio: e.target.value }))}>
-                  <option value="intercambio">Intercambio con otro técnico</option>
-                  <option value="reasignacion">Reasignación (sin técnico específico)</option>
+                <label className="form-label">Técnico sustituto</label>
+                <select
+                  className="form-control"
+                  value={form.tecnico_receptor_id}
+                  onChange={e => setForm(p => ({ ...p, tecnico_receptor_id: e.target.value }))}
+                >
+                  <option value="">— Selecciona técnico —</option>
+                  {tecnicosOrdenados.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre}{t.id === tecnicoEnTurno?.id ? ' ← Le toca por turno' : ''}
+                    </option>
+                  ))}
                 </select>
+                {tecnicoEnTurno && (
+                  <div className="text-sm text-muted mt-3" style={{ marginTop: 5 }}>
+                    Por turno de sustitución le corresponde a <strong>{tecnicoEnTurno.nombre}</strong>
+                  </div>
+                )}
               </div>
-              {form.tipo_cambio === 'intercambio' && (
-                <div className="form-group">
-                  <label className="form-label">Técnico con quien intercambiar</label>
-                  <select className="form-control" value={form.tecnico_receptor_id} onChange={e => setForm(p => ({ ...p, tecnico_receptor_id: e.target.value }))}>
-                    <option value="">— Selecciona técnico —</option>
-                    {tecnicos.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
-                  </select>
-                </div>
-              )}
+
               <div className="form-group">
                 <label className="form-label">Motivo *</label>
                 <textarea

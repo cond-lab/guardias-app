@@ -1,13 +1,9 @@
 import { addDays, getISOWeek, getYear, format, parseISO } from 'date-fns'
 
-/**
- * Genera todos los lunes del año dado
- */
 export function getLunesDelAnio(anio) {
   const semanas = []
   let d = new Date(anio, 0, 1)
   while (d.getDay() !== 1) d = addDays(d, 1)
-
   while (true) {
     const lunes = new Date(d)
     const lunesFin = addDays(lunes, 7)
@@ -28,9 +24,6 @@ export function getLunesDelAnio(anio) {
   return semanas
 }
 
-/**
- * Marca las semanas que contienen festivos
- */
 export function marcarFestivos(semanas, festivos) {
   for (const semana of semanas) {
     const inicio = parseISO(semana.lunes_inicio)
@@ -57,16 +50,17 @@ export function marcarFestivos(semanas, festivos) {
 }
 
 /**
- * Motor principal de asignación equitativa
- * 
- * Regla clave: si al técnico que le toca esta semana le toca TAMBIÉN
- * la semana siguiente (con festivo), se le adelanta el festivo y
- * su semana normal la coge el siguiente en la cola.
+ * Rueda normal y festivo son INDEPENDIENTES.
+ * Rueda navidad separada (Nochebuena/Navidad/Reyes).
  */
 export function asignarGuardias(semanas, tecnicos) {
   const activos = tecnicos
     .filter(t => t.activo && t.rol !== 'admin')
     .sort((a, b) => a.orden_rueda_normal - b.orden_rueda_normal)
+
+  const activosFestivo = tecnicos
+    .filter(t => t.activo && t.rol !== 'admin')
+    .sort((a, b) => (a.orden_rueda_festivo ?? a.orden_rueda_normal) - (b.orden_rueda_festivo ?? b.orden_rueda_normal))
 
   const navidad = tecnicos
     .filter(t => t.activo && t.rol !== 'admin')
@@ -77,7 +71,7 @@ export function asignarGuardias(semanas, tecnicos) {
   const semanasNormales = semanas.filter(s => !s.es_navidad)
   const semanasNavidad = semanas.filter(s => s.es_navidad)
 
-  // --- Rueda Navidad ---
+  // Navidad
   const tiposNavidad = ['navidad_nochebuena', 'navidad_navidad', 'navidad_reyes']
   semanasNavidad.forEach(semana => {
     const idx = tiposNavidad.indexOf(semana.tipo_navidad)
@@ -87,50 +81,27 @@ export function asignarGuardias(semanas, tecnicos) {
     }
   })
 
-  // --- Rueda Normal con priorización festivos ---
+  // Normal y Festivo independientes
   const n = activos.length
-  let idxT = 0
+  const nF = activosFestivo.length
+  let idxNormal = 0
+  let idxFestivo = 0
   const contadores = {}
   activos.forEach(t => { contadores[t.id] = { normal: 0, festivo: 0, total: 0 } })
 
-  let i = 0
-  while (i < semanasNormales.length) {
-    const actual = semanasNormales[i]
-    const siguiente = semanasNormales[i + 1]
-    const tecnico = activos[idxT % n]
-
-    if (actual.tiene_festivo) {
-      // Semana de festivo: asignar directo
-      actual.tecnico_asignado = tecnico
-      actual.tipo = 'festivo'
-      contadores[tecnico.id].festivo++
-      contadores[tecnico.id].total++
-      idxT++
-      i++
-    } else if (siguiente?.tiene_festivo) {
-      // La siguiente es festivo: este técnico se lleva el festivo primero
-      // y la normal se pospone al siguiente técnico
-      siguiente.tecnico_asignado = tecnico
-      siguiente.tipo = 'festivo'
-      contadores[tecnico.id].festivo++
-      contadores[tecnico.id].total++
-      idxT++
-
-      const tecnicoSig = activos[idxT % n]
-      actual.tecnico_asignado = tecnicoSig
-      actual.tipo = 'normal'
-      contadores[tecnicoSig.id].normal++
-      contadores[tecnicoSig.id].total++
-      idxT++
-
-      i += 2
+  for (const semana of semanasNormales) {
+    if (semana.tiene_festivo) {
+      const tecnico = activosFestivo[idxFestivo % nF]
+      semana.tecnico_asignado = tecnico
+      semana.tipo = 'festivo'
+      if (contadores[tecnico.id]) { contadores[tecnico.id].festivo++; contadores[tecnico.id].total++ }
+      idxFestivo++
     } else {
-      actual.tecnico_asignado = tecnico
-      actual.tipo = 'normal'
-      contadores[tecnico.id].normal++
-      contadores[tecnico.id].total++
-      idxT++
-      i++
+      const tecnico = activos[idxNormal % n]
+      semana.tecnico_asignado = tecnico
+      semana.tipo = 'normal'
+      if (contadores[tecnico.id]) { contadores[tecnico.id].normal++; contadores[tecnico.id].total++ }
+      idxNormal++
     }
   }
 
@@ -138,4 +109,15 @@ export function asignarGuardias(semanas, tecnicos) {
     .sort((a, b) => a.lunes_inicio.localeCompare(b.lunes_inicio))
 
   return { semanas: todas, estadisticas: contadores }
+}
+
+/**
+ * Obtiene el técnico que le toca en la rueda de sustitución
+ */
+export function getTecnicoSustitucion(tecnicos, puntero) {
+  const activos = tecnicos
+    .filter(t => t.activo && t.rol !== 'admin')
+    .sort((a, b) => (a.orden_rueda_sustitucion ?? a.orden_rueda_normal) - (b.orden_rueda_sustitucion ?? b.orden_rueda_normal))
+  if (!activos.length) return null
+  return activos[puntero % activos.length]
 }
