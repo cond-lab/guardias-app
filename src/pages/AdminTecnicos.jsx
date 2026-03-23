@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
 
-const FORM_VACIO = { nombre: '', email: '', pin: '', rol: 'tecnico', orden_rueda_normal: 0, orden_rueda_festivo: 0, orden_rueda_navidad: 0, orden_rueda_sustitucion: 0 }
+const FORM_VACIO = { nombre: '', email: '', pin: '', rol: 'tecnico', orden_rueda_normal: 0, orden_rueda_festivo: 0, orden_rueda_navidad: 0, orden_rueda_sustitucion: 0, hace_guardias: true }
 
 const RUEDAS = [
   { key: 'orden_rueda_normal',       label: 'Rueda Normal',        emoji: '📅' },
@@ -88,7 +88,7 @@ export default function AdminTecnicos() {
   }
 
   const tecnicosPorRueda = (campo) =>
-    tecnicos.filter(t => t.rol !== 'admin' && t.activo).sort((a, b) => (a[campo] ?? 0) - (b[campo] ?? 0))
+    tecnicos.filter(t => t.rol !== 'admin' && t.activo && t.hace_guardias !== false).sort((a, b) => (a[campo] ?? 0) - (b[campo] ?? 0))
 
   const ruedaActual = RUEDAS.find(r => r.key === ruedaActiva)
   const listaTecnicos = tecnicosPorRueda(ruedaActiva)
@@ -189,6 +189,7 @@ export default function AdminTecnicos() {
                     <th>🏖 Festivo</th>
                     <th>🎄 Navidad</th>
                     <th>🔄 Sust.</th>
+                    <th>Guardias</th>
                     <th>Estado</th>
                     <th>Acciones</th>
                   </tr>
@@ -204,6 +205,7 @@ export default function AdminTecnicos() {
                       <td className="font-mono text-muted text-sm">{t.rol !== 'admin' ? (t.orden_rueda_festivo ?? 0) + 1 : '—'}</td>
                       <td className="font-mono text-muted text-sm">{t.rol !== 'admin' ? (t.orden_rueda_navidad ?? 0) + 1 : '—'}</td>
                       <td className="font-mono text-muted text-sm">{t.rol !== 'admin' ? (t.orden_rueda_sustitucion ?? 0) + 1 : '—'}</td>
+                      <td>{t.rol !== 'admin' ? <span className={`badge ${t.hace_guardias !== false ? 'badge-aprobada' : 'badge-rechazada'}`}>{t.hace_guardias !== false ? 'Sí' : 'No'}</span> : '—'}</td>
                       <td><span className={`badge ${t.activo ? 'badge-aprobada' : 'badge-rechazada'}`}>{t.activo ? 'Activo' : 'Inactivo'}</span></td>
                       <td>
                         <div className="flex gap-2">
@@ -251,6 +253,13 @@ export default function AdminTecnicos() {
                 <select className="form-control" value={form.rol} onChange={e => setForm(p => ({ ...p, rol: e.target.value }))}>
                   <option value="tecnico">Técnico</option>
                   <option value="admin">Administrador</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">¿Entra en rueda de guardias?</label>
+                <select className="form-control" value={form.hace_guardias ? 'si' : 'no'} onChange={e => setForm(p => ({ ...p, hace_guardias: e.target.value === 'si' }))}>
+                  <option value="si">Sí — entra en la rueda de guardias</option>
+                  <option value="no">No — solo conductivos</option>
                 </select>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
