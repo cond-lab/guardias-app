@@ -55,15 +55,15 @@ export function marcarFestivos(semanas, festivos) {
  */
 export function asignarGuardias(semanas, tecnicos) {
   const activos = tecnicos
-    .filter(t => t.activo && t.rol !== 'admin')
+    .filter(t => t.activo && t.rol !== 'admin' && t.hace_guardias !== false)
     .sort((a, b) => a.orden_rueda_normal - b.orden_rueda_normal)
 
   const activosFestivo = tecnicos
-    .filter(t => t.activo && t.rol !== 'admin')
+    .filter(t => t.activo && t.rol !== 'admin' && t.hace_guardias !== false)
     .sort((a, b) => (a.orden_rueda_festivo ?? a.orden_rueda_normal) - (b.orden_rueda_festivo ?? b.orden_rueda_normal))
 
   const navidad = tecnicos
-    .filter(t => t.activo && t.rol !== 'admin')
+    .filter(t => t.activo && t.rol !== 'admin' && t.hace_guardias !== false)
     .sort((a, b) => a.orden_rueda_navidad - b.orden_rueda_navidad)
 
   if (!activos.length) return { semanas, estadisticas: {} }
@@ -116,7 +116,7 @@ export function asignarGuardias(semanas, tecnicos) {
  */
 export function getTecnicoSustitucion(tecnicos, puntero) {
   const activos = tecnicos
-    .filter(t => t.activo && t.rol !== 'admin')
+    .filter(t => t.activo && t.rol !== 'admin' && t.hace_guardias !== false)
     .sort((a, b) => (a.orden_rueda_sustitucion ?? a.orden_rueda_normal) - (b.orden_rueda_sustitucion ?? b.orden_rueda_normal))
   if (!activos.length) return null
   return activos[puntero % activos.length]
