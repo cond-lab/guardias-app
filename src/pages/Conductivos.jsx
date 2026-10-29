@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import Avatar from '../components/Avatar'
 import { useConfirmar } from '../components/Confirmar'
 import { useAuth } from '../context/AuthContext'
 import { format, parseISO, isWithinInterval, addDays } from 'date-fns'
@@ -258,9 +259,11 @@ export default function Conductivos() {
                             : tecnAsig.map(ct => (
                               <span key={ct.tecnico_id} style={{
                                 background: 'var(--gris-2)', color: 'var(--gris-8)',
-                                padding: '2px 8px', borderRadius: 99, fontSize: 12, fontWeight: 500
+                                padding: '2px 10px 2px 2px', borderRadius: 99, fontSize: 12, fontWeight: 600,
+                                display: 'inline-flex', alignItems: 'center', gap: 6
                               }}>
-                                👤 {ct.tecnicos?.nombre}
+                                <Avatar id={ct.tecnico_id} nombre={ct.tecnicos?.nombre || '?'} size={20} />
+                                {ct.tecnicos?.nombre}
                               </span>
                             ))
                           }

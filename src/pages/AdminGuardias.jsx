@@ -5,6 +5,7 @@ import SelectorAnio, { ANIO_ACTUAL } from '../components/SelectorAnio'
 import { getLunesDelAnio, marcarFestivos, asignarGuardias, ultimosDeRueda, calcularSaldoNormal, tecnicoOriginal, puedeHacerGuardias } from '../utils/asignacion'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
+import { TecnicoChip } from '../components/Avatar'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -66,6 +67,7 @@ export default function AdminGuardias() {
     const stats = ts.filter(t => t.rol !== 'admin' && (puedeHacerGuardias(t) || tieneSemanas(t))).map(t => {
       const suyas = gs.filter(g => tecnicoOriginal(g) === t.id)
       return {
+        id: t.id,
         nombre: t.nombre,
         estado: !t.activo ? 'Baja' : t.hace_guardias === false ? 'Fuera de guardias' : null,
         normal: suyas.filter(g => g.tipo === 'normal').length,
@@ -346,10 +348,18 @@ export default function AdminGuardias() {
         {estadisticas.length > 0 && (
           <div className="card mb-4">
             <div className="card-header">
-              Distribución por técnico
-              <span className="text-sm text-muted" style={{ fontWeight: 400 }}>
-                Cuentan las guardias que le tocaron; las hechas por otro como reserva van aparte
-              </span>
+              <div>
+                Distribución por técnico
+                <div className="text-sm text-muted" style={{ fontWeight: 500, marginTop: 2 }}>
+                  Cuentan las guardias que le tocaron; las hechas por otro como reserva van aparte
+                </div>
+              </div>
+              <div className="reparto-leyenda">
+                <span><i style={{ background: 'var(--normal)' }} />Normal</span>
+                <span><i style={{ background: 'var(--festivo)' }} />Festivo</span>
+                <span><i style={{ background: 'var(--navidad)' }} />Navidad</span>
+                <span><i style={{ background: 'var(--reserva)' }} />Reserva</span>
+              </div>
             </div>
             <div className="table-wrap">
               <table>
@@ -366,22 +376,27 @@ export default function AdminGuardias() {
                 </thead>
                 <tbody>
                   {estadisticas.map(s => {
-                    const maxTotal = Math.max(...estadisticas.map(x => x.total))
-                    const pct = maxTotal ? Math.round((s.total / maxTotal) * 100) : 0
+                    // Barras apiladas en la misma escala para todos: normal, festivo, Navidad y reserva
+                    const maxTotal = Math.max(...estadisticas.map(x => x.total + x.reserva), 1)
+                    const ancho = n => `${(n / maxTotal) * 100}%`
                     return (
-                      <tr key={s.nombre} style={s.estado ? { opacity: 0.6 } : undefined}>
+                      <tr key={s.id} style={s.estado ? { opacity: 0.6 } : undefined}>
                         <td>
-                          <strong>{s.nombre}</strong>
-                          {s.estado && <span className="badge badge-rechazada" style={{ marginLeft: 8 }}>{s.estado}</span>}
+                          <TecnicoChip id={s.id} nombre={s.nombre}>
+                            {s.estado && <span className="badge badge-rechazada">{s.estado}</span>}
+                          </TecnicoChip>
                         </td>
                         <td className="font-mono">{s.normal}</td>
                         <td className="font-mono">{s.festivo}</td>
                         <td className="font-mono">{s.navidad}</td>
                         <td className="font-mono"><strong>{s.total}</strong></td>
                         <td className="font-mono text-muted">{s.reserva}</td>
-                        <td style={{ width: 160 }}>
-                          <div style={{ background: 'var(--gris-2)', borderRadius: 4, height: 8 }}>
-                            <div style={{ background: 'var(--azul)', width: `${pct}%`, height: 8, borderRadius: 4 }} />
+                        <td style={{ width: 220 }}>
+                          <div className="reparto-barra" title={`${s.normal} normales · ${s.festivo} festivos · ${s.navidad} Navidad · ${s.reserva} como reserva`}>
+                            <span style={{ width: ancho(s.normal), background: 'var(--normal)' }} />
+                            <span style={{ width: ancho(s.festivo), background: 'var(--festivo)' }} />
+                            <span style={{ width: ancho(s.navidad), background: 'var(--navidad)' }} />
+                            <span style={{ width: ancho(s.reserva), background: 'var(--reserva)' }} />
                           </div>
                         </td>
                       </tr>
@@ -429,7 +444,7 @@ export default function AdminGuardias() {
                       <td className="font-mono text-muted text-sm">{i + 1}</td>
                       <td className="text-sm">{formatFecha(g.lunes_inicio)}</td>
                       <td className="text-sm">{formatFecha(g.lunes_fin)}</td>
-                      <td><strong>{g.tecnicos?.nombre || <span className="text-muted">Sin asignar</span>}</strong></td>
+                      <td><strong><TecnicoChip id={g.tecnico_id} nombre={g.tecnicos?.nombre} size={24} /></strong></td>
                       <td>{tipoLabel[g.tipo] || g.tipo}</td>
                       <td className="text-sm text-muted">{g.festivo_nombre || '—'}</td>
                       <td>
@@ -491,7 +506,7 @@ export default function AdminGuardias() {
                     <tbody>
                       {modalGenerar.filas.map(f => (
                         <tr key={f.id}>
-                          <td><strong>{f.nombre}</strong></td>
+                          <td><strong><TecnicoChip id={f.id} nombre={f.nombre} size={24} /></strong></td>
                           <td className="font-mono text-muted">{f.calculado > 0 ? `+${f.calculado}` : f.calculado < 0 ? `−${-f.calculado}` : '0'}</td>
                           <td>
                             <div className="flex gap-2" style={{ alignItems: 'center' }}>

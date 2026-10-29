@@ -4,6 +4,9 @@ import SelectorAnio, { ANIO_ACTUAL } from '../components/SelectorAnio'
 import { useAuth } from '../context/AuthContext'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
+import Avatar from '../components/Avatar'
+import GuardiaAhora from '../components/GuardiaAhora'
+import MapaAnual from '../components/MapaAnual'
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
@@ -28,6 +31,15 @@ export default function Calendario() {
   const [guardias, setGuardias] = useState([])
   const [loading, setLoading] = useState(true)
   const [filtro, setFiltro] = useState('todas') // 'todas' | 'festivos' | 'navidad' | 'mias'
+  const [resaltada, setResaltada] = useState(null)
+
+  // Desde el mapa anual: ir a la semana en el listado y marcarla un momento
+  function irASemana(g) {
+    setFiltro('todas')
+    setResaltada(g.id)
+    setTimeout(() => document.getElementById(`sem-${g.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
+    setTimeout(() => setResaltada(r => (r === g.id ? null : r)), 2500)
+  }
 
   useEffect(() => { cargar() }, [anio])
 
@@ -70,6 +82,8 @@ export default function Calendario() {
       </div>
 
       <div className="page-body">
+        <GuardiaAhora userId={user.id} />
+
         {/* Stats rápidas */}
         <div className="stats-grid mb-4">
           <div className="stat-card">
@@ -90,8 +104,10 @@ export default function Calendario() {
           </div>
         </div>
 
+        {!loading && guardias.length > 0 && <MapaAnual guardias={guardias} userId={user.id} onElegir={irASemana} />}
+
         {/* Filtros */}
-        <div className="flex gap-2 mb-4">
+        <div className="flex gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
           {[['todas','Todas'],['mias','Mis guardias'],['festivos','Festivos'],['navidad','Navidad']].map(([val, label]) => (
             <button key={val} className={`btn ${filtro === val ? 'btn-primary' : 'btn-outline'} btn-sm`} onClick={() => setFiltro(val)}>
               {label}
@@ -111,10 +127,10 @@ export default function Calendario() {
                 <div key={mes} className="card cal-mes">
                   <div className="cal-mes-titulo">
                     {MESES[mes]}
-                    <span className="font-mono text-muted" style={{ fontSize: 11, fontWeight: 500, letterSpacing: 0 }}>{sems.length} sem.</span>
+                    <span className="badge badge-normal">{sems.length} sem.</span>
                   </div>
                   {sems.map(g => (
-                    <div key={g.id} className={`cal-semana tipo-${g.tipo?.startsWith('navidad') ? 'navidad' : g.tipo} ${g.tecnico_id === user.id ? 'mi-guardia' : ''}`}>
+                    <div key={g.id} id={`sem-${g.id}`} className={`cal-semana tipo-${g.tipo?.startsWith('navidad') ? 'navidad' : g.tipo} ${g.tecnico_id === user.id ? 'mi-guardia' : ''} ${resaltada === g.id ? 'resaltada' : ''}`}>
                       <div className="cal-fechas">
                         <div className="cal-rango">{formatRango(g.lunes_inicio, g.lunes_fin)}</div>
                         {(g.tiene_festivo || g.tipo?.startsWith('navidad')) && (
@@ -124,8 +140,9 @@ export default function Calendario() {
                       </div>
                       <div className={`cal-tecnico ${!g.tecnicos ? 'sin-asignar' : ''}`}>
                         {g.tecnicos?.nombre || 'Sin asignar'}
-                        {g.tecnico_id === user.id && <div><span className="cal-tu">Tú</span></div>}
+                        {g.tecnico_id === user.id && <span className="cal-tu">Tú</span>}
                       </div>
+                      {g.tecnicos && <Avatar id={g.tecnico_id} nombre={g.tecnicos.nombre} size={32} />}
                     </div>
                   ))}
                 </div>

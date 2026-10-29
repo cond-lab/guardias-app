@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import Avatar from './Avatar'
 
 export default function Layout() {
   const { user, logout, isAdmin, cambiarPin } = useAuth()
@@ -68,15 +69,18 @@ export default function Layout() {
           )}
         </nav>
         <div className="sidebar-footer">
-          <div>
-            <div className="user-name">{user?.nombre}</div>
-            <div className="user-rol">{user?.rol === 'admin' ? 'Administrador' : 'Técnico'}</div>
+          <div className="sidebar-usuario">
+            <Avatar id={user?.id} nombre={user?.nombre || '?'} size={34} />
+            <div style={{ minWidth: 0 }}>
+              <div className="user-name">{user?.nombre}</div>
+              <div className="user-rol">{user?.rol === 'admin' ? 'Administrador' : 'Técnico'}</div>
+            </div>
           </div>
           <div className="sidebar-acciones">
             <button className="btn-logout" onClick={() => { setModalPin(true); setPinMsg(null); setPinNuevo(''); setPinNuevo2('') }}>
               🔑 Cambiar PIN
             </button>
-            <button className="btn-logout" onClick={handleLogout}>Cerrar sesión</button>
+            <button className="btn-logout" title="Cerrar sesión" onClick={handleLogout}>Salir</button>
           </div>
         </div>
       </aside>

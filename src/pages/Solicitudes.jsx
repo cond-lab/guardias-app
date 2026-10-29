@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import { TecnicoChip } from '../components/Avatar'
 import { useAuth } from '../context/AuthContext'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -149,9 +150,9 @@ export default function Solicitudes() {
                           ? `${formatFecha(s.semanas_guardia.lunes_inicio)} → ${formatFecha(s.semanas_guardia.lunes_fin)}`
                           : '—'}
                       </td>
-                      <td><strong>{s.solicitante?.nombre || '—'}</strong></td>
+                      <td><strong><TecnicoChip id={s.tecnico_solicitante_id} nombre={s.solicitante?.nombre} size={24} /></strong></td>
                       <td>{tipoCambioLabel(s.tipo_cambio)}</td>
-                      <td>{s.receptor?.nombre || <span className="text-muted">—</span>}</td>
+                      <td>{s.receptor?.nombre ? <TecnicoChip id={s.tecnico_receptor_id} nombre={s.receptor.nombre} size={24} /> : <span className="text-muted">—</span>}</td>
                       <td style={{ maxWidth: 200, wordBreak: 'break-word' }}>{s.motivo}</td>
                       <td>{estadoBadge(s.estado)}</td>
                       {isAdmin && (

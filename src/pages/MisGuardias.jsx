@@ -3,8 +3,10 @@ import { supabase } from '../services/supabase'
 import SelectorAnio, { ANIO_ACTUAL } from '../components/SelectorAnio'
 import { useAuth } from '../context/AuthContext'
 import { ruedaReservaDesde, puedeHacerGuardias } from '../utils/asignacion'
-import { format, parseISO } from 'date-fns'
+import { format, parseISO, differenceInCalendarDays } from 'date-fns'
 import { es } from 'date-fns/locale'
+import GuardiaAhora from '../components/GuardiaAhora'
+import { TecnicoChip } from '../components/Avatar'
 
 function formatFecha(f) { return format(parseISO(f), "d 'de' MMMM yyyy", { locale: es }) }
 
@@ -118,10 +120,29 @@ export default function MisGuardias() {
       </div>
 
       <div className="page-body">
+        <GuardiaAhora userId={user.id} />
         {loading ? (
           <div className="loading-center"><div className="spinner" /><span>Cargando...</span></div>
         ) : (
           <>
+            {(() => {
+              // Tu próxima guardia (o la que estás haciendo ahora)
+              const hoy = new Date()
+              const proxima = guardias.find(g => parseISO(g.lunes_fin) > hoy)
+              if (!proxima) return null
+              const enCurso = parseISO(proxima.lunes_inicio) <= hoy
+              const dias = differenceInCalendarDays(parseISO(proxima.lunes_inicio), hoy)
+              return (
+                <div className="alert alert-info mb-4" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <TecnicoChip id={user.id} nombre={user.nombre} size={30} />
+                  <span>
+                    {enCurso
+                      ? <>Estás <strong>de guardia esta semana</strong> (hasta el {formatFecha(proxima.lunes_fin)}).</>
+                      : <>Tu próxima guardia empieza el <strong>{formatFecha(proxima.lunes_inicio)}</strong> · {dias === 1 ? 'mañana' : `en ${dias} días`}.</>}
+                  </span>
+                </div>
+              )
+            })()}
             <div className="stats-grid mb-4">
               <div className="stat-card">
                 <div className="stat-num">{guardias.length}</div>

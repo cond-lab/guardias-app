@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import { TecnicoChip } from '../components/Avatar'
 import { getSiguienteReserva, puedeHacerGuardias, tecnicoOriginal } from '../utils/asignacion'
 import { format, parseISO, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -238,8 +239,8 @@ export default function AdminTecnicos() {
                   ? 'var(--azul-claro)' : undefined
               }}>
                 <span className="font-mono text-muted" style={{ width: 24, textAlign: 'right', fontSize: 12 }}>{i + 1}</span>
-                <span style={{ flex: 1, fontWeight: 500 }}>
-                  {t.nombre}
+                <span style={{ flex: 1, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <TecnicoChip id={t.id} nombre={t.nombre} size={26} />
                   {ruedaActiva === 'orden_rueda_sustitucion' && t.id === tecnicoEnTurno?.id &&
                     <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--azul)', fontWeight: 700 }}>← En turno</span>
                   }
@@ -277,7 +278,7 @@ export default function AdminTecnicos() {
                 <tbody>
                   {tecnicos.map(t => (
                     <tr key={t.id} style={!t.activo ? { opacity: 0.6 } : undefined}>
-                      <td><strong>{t.nombre}</strong></td>
+                      <td><strong><TecnicoChip id={t.id} nombre={t.nombre} size={26} /></strong></td>
                       <td className="text-sm text-muted">{t.email || '—'}</td>
                       <td className="font-mono text-sm">{t.pin}</td>
                       <td>{t.rol === 'admin' ? <span className="badge badge-navidad">Admin</span> : <span className="badge badge-normal">Técnico</span>}</td>
