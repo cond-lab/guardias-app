@@ -3,10 +3,10 @@ import { supabase } from '../services/supabase'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 
-const FORM_VACIO = { fecha: '', nombre: '', tipo: 'nacional', anio: 2026 }
+const FORM_VACIO = { fecha: '', nombre: '', tipo: 'nacional', anio: new Date().getFullYear() }
 
 export default function AdminFestivos() {
-  const [anio, setAnio] = useState(2026)
+  const [anio, setAnio] = useState(new Date().getFullYear())
   const [festivos, setFestivos] = useState([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)
@@ -64,7 +64,7 @@ export default function AdminFestivos() {
         </div>
         <div className="flex gap-2">
           <select className="form-control" style={{ width: 'auto' }} value={anio} onChange={e => setAnio(+e.target.value)}>
-            {[2025, 2026, 2027].map(a => <option key={a}>{a}</option>)}
+            {Array.from({ length: new Date().getFullYear() - 2023 }, (_, i) => 2025 + i).map(a => <option key={a}>{a}</option>)}
           </select>
           <button className="btn btn-primary" onClick={abrirNuevo}>+ Añadir festivo</button>
         </div>

@@ -45,10 +45,21 @@ export default function Solicitudes() {
       const s = modalResolver
 
       if (estado === 'aprobada') {
-        // Asignar la guardia al técnico receptor
+        // Guardar a quién le tocaba (para el recuento) antes de pasarla al receptor
+        const { data: semana, error: errLeer } = await supabase
+          .from('semanas_guardia')
+          .select('tecnico_id, tecnico_original_id')
+          .eq('id', s.semana_id)
+          .single()
+        if (errLeer) throw errLeer
+
         const { error: errSemana } = await supabase
           .from('semanas_guardia')
-          .update({ tecnico_id: s.tecnico_receptor_id, estado: 'modificada' })
+          .update({
+            tecnico_id: s.tecnico_receptor_id,
+            tecnico_original_id: semana.tecnico_original_id || semana.tecnico_id,
+            estado: 'modificada'
+          })
           .eq('id', s.semana_id)
         if (errSemana) throw errSemana
 

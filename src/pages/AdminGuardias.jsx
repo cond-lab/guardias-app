@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { getLunesDelAnio, marcarFestivos, asignarGuardias } from '../utils/asignacion'
+import { getLunesDelAnio, marcarFestivos, asignarGuardias, ultimosDeRueda, calcularSaldoNormal, tecnicoOriginal } from '../utils/asignacion'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import * as XLSX from 'xlsx'
@@ -9,8 +9,23 @@ import autoTable from 'jspdf-autotable'
 
 function formatFecha(f) { return format(parseISO(f), "d MMM yyyy", { locale: es }) }
 
+const ANIO_ACTUAL = new Date().getFullYear()
+const ANIOS = Array.from({ length: ANIO_ACTUAL - 2025 + 2 }, (_, i) => 2025 + i)
+
+// Semanas ya asignadas antes de una fecha (de cualquier año), para continuar las ruedas
+async function historialAntesDe(fecha) {
+  const { data, error } = await supabase
+    .from('semanas_guardia')
+    .select('lunes_inicio, tipo, tecnico_id, tecnico_original_id, anio')
+    .lt('lunes_inicio', fecha)
+    .order('lunes_inicio', { ascending: false })
+    .limit(70)
+  if (error) throw error
+  return data || []
+}
+
 export default function AdminGuardias() {
-  const [anio, setAnio] = useState(2026)
+  const [anio, setAnio] = useState(ANIO_ACTUAL)
   const [guardias, setGuardias] = useState([])
   const [tecnicos, setTecnicos] = useState([])
   const [estadisticas, setEstadisticas] = useState([])
@@ -37,32 +52,57 @@ export default function AdminGuardias() {
   }
 
   function calcularEstadisticas(gs, ts) {
-    const stats = ts.filter(t => t.rol !== 'admin').map(t => ({
-      nombre: t.nombre,
-      normal: gs.filter(g => g.tecnico_id === t.id && g.tipo === 'normal').length,
-      festivo: gs.filter(g => g.tecnico_id === t.id && g.tipo === 'festivo').length,
-      navidad: gs.filter(g => g.tecnico_id === t.id && g.tipo?.startsWith('navidad')).length,
-      total: gs.filter(g => g.tecnico_id === t.id).length,
-    }))
+    // Cuentan las que le tocaron a cada uno; las hechas como reserva van aparte
+    const stats = ts.filter(t => t.rol !== 'admin' && t.hace_guardias !== false).map(t => {
+      const suyas = gs.filter(g => tecnicoOriginal(g) === t.id)
+      return {
+        nombre: t.nombre,
+        normal: suyas.filter(g => g.tipo === 'normal').length,
+        festivo: suyas.filter(g => g.tipo === 'festivo').length,
+        navidad: suyas.filter(g => g.tipo?.startsWith('navidad')).length,
+        total: suyas.length,
+        reserva: gs.filter(g => g.tecnico_id === t.id && tecnicoOriginal(g) !== t.id).length,
+      }
+    })
     setEstadisticas(stats.sort((a, b) => b.total - a.total))
   }
 
   async function generarGuardias() {
-    if (!window.confirm(`¿Generar guardias para ${anio}? Se crearán todas las semanas del año.`)) return
     setGenerando(true); setMsg(null)
     try {
-      const { data: festivosDB } = await supabase.from('festivos').select('*').eq('anio', anio)
-      const { data: tecnicosDB } = await supabase.from('tecnicos').select('*').eq('activo', true).order('orden_rueda_normal')
-      if (!tecnicosDB?.filter(t => t.rol !== 'admin').length) throw new Error('No hay técnicos activos')
-
       let semanas = getLunesDelAnio(anio)
+      const desde = semanas[0].lunes_inicio
+      const hasta = semanas[semanas.length - 1].lunes_fin
+
+      // Festivos por fecha (no por la columna anio: Reyes del año siguiente suele estar guardado en el anterior)
+      const { data: festivosDB, error: errF } = await supabase.from('festivos').select('*').gte('fecha', desde).lt('fecha', hasta)
+      if (errF) throw errF
+      // Todos los técnicos (también inactivos) para situar a los últimos de cada rueda
+      const { data: tecnicosDB, error: errT } = await supabase.from('tecnicos').select('*')
+      if (errT) throw errT
+      if (!tecnicosDB?.some(t => t.activo && t.rol !== 'admin' && t.hace_guardias !== false)) throw new Error('No hay técnicos activos')
+
+      const historial = await historialAntesDe(desde)
+      const ultimos = ultimosDeRueda(historial)
+      const saldoNormal = calcularSaldoNormal(historial.filter(s => s.anio === anio - 1), tecnicosDB)
+
+      const nombre = id => tecnicosDB.find(t => t.id === id)?.nombre || '—'
+      const compensa = Object.entries(saldoNormal)
+        .map(([id, v]) => `• ${nombre(id)}: ${v < 0 ? `+${-v} (le faltan)` : `−${v} (le sobran)`}`)
+      if (!window.confirm(
+        `¿Generar guardias para ${anio}? Se crearán todas las semanas del año.\n\n` +
+        `Las ruedas continúan tras:\n• Normal: ${nombre(ultimos.normal)}\n• Festivo: ${nombre(ultimos.festivo)}\n• Navidad: ${nombre(ultimos.navidad)}\n\n` +
+        (compensa.length ? `Compensación de normales de ${anio - 1}:\n${compensa.join('\n')}` : `Sin compensación de ${anio - 1}.`)
+      )) return
+
       semanas = marcarFestivos(semanas, festivosDB || [])
-      const { semanas: asignadas } = asignarGuardias(semanas, tecnicosDB)
+      const { semanas: asignadas } = asignarGuardias(semanas, tecnicosDB, { ultimos, saldoNormal })
 
       const rows = asignadas.map(s => ({
         lunes_inicio: s.lunes_inicio,
         lunes_fin: s.lunes_fin,
         tecnico_id: s.tecnico_asignado?.id || null,
+        tecnico_original_id: s.tecnico_asignado?.id || null,
         tipo: s.tipo || 'normal',
         estado: 'pendiente',
         anio: s.anio,
@@ -92,7 +132,8 @@ export default function AdminGuardias() {
   async function guardarEdicion() {
     const { error } = await supabase
       .from('semanas_guardia')
-      .update({ tecnico_id: tecnicoEdit || null, notas: notasEdit, estado: 'modificada' })
+      // Cambio a mano del admin = reasignación: cuenta para el nuevo técnico
+      .update({ tecnico_id: tecnicoEdit || null, tecnico_original_id: tecnicoEdit || null, notas: notasEdit, estado: 'modificada' })
       .eq('id', modalEditar.id)
     if (error) { setMsg({ tipo: 'danger', texto: error.message }); return }
     setModalEditar(null)
@@ -104,8 +145,8 @@ export default function AdminGuardias() {
    * 
    * Lógica:
    * 1. La semana editada se respeta tal cual (tecnico_id actual)
-   * 2. Determinamos en qué posición de la rueda queda ese técnico
-   *    (el siguiente en la rueda normal/festivo parte desde él)
+   * 2. Cada rueda (normal/festivo) continúa tras el último que la tuvo
+   *    hasta esa semana, incluida (también del año anterior)
    * 3. Recalculamos y actualizamos en BD solo las semanas posteriores
    */
   async function recalcularDesde(semanaEditada) {
@@ -115,8 +156,7 @@ export default function AdminGuardias() {
 
     setRecalculando(true); setMsg(null)
     try {
-      const { data: festivosDB } = await supabase.from('festivos').select('*').eq('anio', anio)
-      const { data: tecnicosDB } = await supabase.from('tecnicos').select('*').eq('activo', true)
+      const { data: tecnicosDB } = await supabase.from('tecnicos').select('*')
 
       // Todas las semanas del año ordenadas
       const { data: todasSemanas } = await supabase
@@ -140,60 +180,30 @@ export default function AdminGuardias() {
         return
       }
 
-      // Calcular punteros de rueda normal y festivo contando las semanas anteriores
-      const activos = tecnicosDB
-        .filter(t => t.activo && t.rol !== 'admin')
-        .sort((a, b) => a.orden_rueda_normal - b.orden_rueda_normal)
-      const activosFestivo = tecnicosDB
-        .filter(t => t.activo && t.rol !== 'admin')
-        .sort((a, b) => (a.orden_rueda_festivo ?? a.orden_rueda_normal) - (b.orden_rueda_festivo ?? b.orden_rueda_normal))
+      if (!tecnicosDB?.some(t => t.activo && t.rol !== 'admin' && t.hace_guardias !== false)) throw new Error('No hay técnicos activos')
 
-      if (!activos.length) throw new Error('No hay técnicos activos')
+      // Las ruedas continúan tras el último de cada una hasta la semana editada (incluida)
+      const historial = [...await historialAntesDe(todasSemanas[0].lunes_inicio), ...semanasAnteriores]
+      const ultimos = ultimosDeRueda(historial)
 
-      const n = activos.length
-      const nF = activosFestivo.length
+      // Navidad no se toca (va fija, para que nadie quede pegado a ella);
+      // el resto se reasigna con el mismo motor que al generar
+      const aRecalcular = semanasASiguientes.map(s => ({
+        ...s,
+        es_navidad: false,
+        tecnico_fijo: s.tipo?.startsWith('navidad') ? (s.tecnico_id || 'sin-asignar') : null,
+      }))
+      const { semanas: asignadas } = asignarGuardias(aRecalcular, tecnicosDB, { ultimos })
 
-      // Contar cuántas normales y cuántas festivos hay en las semanas anteriores (incluida la editada)
-      // para saber en qué posición de la rueda estamos
-      let cuentaNormal = 0
-      let cuentaFestivo = 0
-      for (const s of semanasAnteriores) {
-        if (s.tipo === 'normal') cuentaNormal++
-        else if (s.tipo === 'festivo') cuentaFestivo++
-        // navidad no consume rueda normal ni festivo
-      }
-
-      // El técnico asignado en la semana editada ya fue contado arriba.
-      // El siguiente puntero parte desde cuentaNormal y cuentaFestivo.
-      let idxNormal = cuentaNormal
-      let idxFestivo = cuentaFestivo
-
-      // Recalcular las semanas siguientes
-      const updates = []
-      for (const semana of semanasASiguientes) {
-        if (semana.tipo?.startsWith('navidad')) {
-          // Navidad no se toca
-          continue
-        }
-
-        let tecnicoId
-        if (semana.tiene_festivo) {
-          tecnicoId = activosFestivo[idxFestivo % nF]?.id || null
-          idxFestivo++
-        } else {
-          tecnicoId = activos[idxNormal % n]?.id || null
-          idxNormal++
-        }
-
-        updates.push({ id: semana.id, tecnico_id: tecnicoId, estado: 'pendiente' })
-      }
-
-      // Actualizar en BD en lotes
+      const updates = asignadas
+        .filter(s => !s.tecnico_fijo)
+        .map(s => ({ id: s.id, tecnico_id: s.tecnico_asignado?.id || null }))
       for (const u of updates) {
-        await supabase
+        const { error } = await supabase
           .from('semanas_guardia')
-          .update({ tecnico_id: u.tecnico_id, estado: u.estado })
+          .update({ tecnico_id: u.tecnico_id, tecnico_original_id: u.tecnico_id, estado: 'pendiente' })
           .eq('id', u.id)
+        if (error) throw error
       }
 
       setMsg({ tipo: 'success', texto: `✓ ${updates.length} semanas recalculadas correctamente` })
@@ -255,7 +265,8 @@ export default function AdminGuardias() {
     festivo: '🏖 Festivo',
     navidad_nochebuena: '🎄 Nochebuena',
     navidad_navidad: '🎅 Navidad',
-    navidad_reyes: '👑 Reyes'
+    navidad_reyes: '👑 Reyes',
+    navidad_anionuevo: '🥂 Año Nuevo'
   }
 
   return (
@@ -267,7 +278,7 @@ export default function AdminGuardias() {
         </div>
         <div className="flex gap-2">
           <select className="form-control" style={{ width: 'auto' }} value={anio} onChange={e => setAnio(+e.target.value)}>
-            {[2025, 2026, 2027].map(a => <option key={a}>{a}</option>)}
+            {ANIOS.map(a => <option key={a}>{a}</option>)}
           </select>
         </div>
       </div>
@@ -306,7 +317,12 @@ export default function AdminGuardias() {
         {/* Estadísticas */}
         {estadisticas.length > 0 && (
           <div className="card mb-4">
-            <div className="card-header">Distribución por técnico</div>
+            <div className="card-header">
+              Distribución por técnico
+              <span className="text-sm text-muted" style={{ fontWeight: 400 }}>
+                Cuentan las guardias que le tocaron; las hechas por otro como reserva van aparte
+              </span>
+            </div>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -316,6 +332,7 @@ export default function AdminGuardias() {
                     <th>Festivos</th>
                     <th>Navidad</th>
                     <th>Total</th>
+                    <th>Hechas como reserva</th>
                     <th>Distribución</th>
                   </tr>
                 </thead>
@@ -330,6 +347,7 @@ export default function AdminGuardias() {
                         <td className="font-mono">{s.festivo}</td>
                         <td className="font-mono">{s.navidad}</td>
                         <td className="font-mono"><strong>{s.total}</strong></td>
+                        <td className="font-mono text-muted">{s.reserva}</td>
                         <td style={{ width: 160 }}>
                           <div style={{ background: 'var(--gris-2)', borderRadius: 4, height: 8 }}>
                             <div style={{ background: 'var(--azul)', width: `${pct}%`, height: 8, borderRadius: 4 }} />

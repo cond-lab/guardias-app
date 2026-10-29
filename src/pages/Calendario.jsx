@@ -9,7 +9,7 @@ const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto'
 function tipoBadge(tipo) {
   if (tipo === 'festivo') return <span className="badge badge-festivo">🏖 Festivo</span>
   if (tipo?.startsWith('navidad')) {
-    const labels = { navidad_nochebuena: '🎄 Nochebuena', navidad_navidad: '🎅 Navidad', navidad_reyes: '👑 Reyes' }
+    const labels = { navidad_nochebuena: '🎄 Nochebuena', navidad_navidad: '🎅 Navidad', navidad_reyes: '👑 Reyes', navidad_anionuevo: '🥂 Año Nuevo' }
     return <span className="badge badge-navidad">{labels[tipo] || '🎄 Navidad'}</span>
   }
   return null
@@ -23,7 +23,7 @@ function formatRango(inicio, fin) {
 
 export default function Calendario() {
   const { user } = useAuth()
-  const [anio, setAnio] = useState(2026)
+  const [anio, setAnio] = useState(new Date().getFullYear())
   const [guardias, setGuardias] = useState([])
   const [loading, setLoading] = useState(true)
   const [filtro, setFiltro] = useState('todas') // 'todas' | 'festivos' | 'navidad' | 'mias'
@@ -65,7 +65,7 @@ export default function Calendario() {
         </div>
         <div className="flex gap-2">
           <select className="form-control" style={{ width: 'auto' }} value={anio} onChange={e => setAnio(+e.target.value)}>
-            {[2025,2026,2027].map(a => <option key={a}>{a}</option>)}
+            {Array.from({ length: new Date().getFullYear() - 2023 }, (_, i) => 2025 + i).map(a => <option key={a}>{a}</option>)}
           </select>
         </div>
       </div>

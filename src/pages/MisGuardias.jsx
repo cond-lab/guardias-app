@@ -16,7 +16,8 @@ function abrirEnGoogleCalendar(guardia, nombreTecnico) {
     festivo: 'Guardia Festivo',
     navidad_nochebuena: 'Guardia Nochebuena',
     navidad_navidad: 'Guardia Navidad',
-    navidad_reyes: 'Guardia Reyes'
+    navidad_reyes: 'Guardia Reyes',
+    navidad_anionuevo: 'Guardia Año Nuevo'
   }
   const titulo = encodeURIComponent(`${tipoLabel[guardia.tipo] || 'Guardia'} — ${nombreTecnico}`)
   const descripcion = encodeURIComponent(
@@ -28,7 +29,7 @@ function abrirEnGoogleCalendar(guardia, nombreTecnico) {
 
 export default function MisGuardias() {
   const { user } = useAuth()
-  const [anio, setAnio] = useState(2026)
+  const [anio, setAnio] = useState(new Date().getFullYear())
   const [guardias, setGuardias] = useState([])
   const [tecnicos, setTecnicos] = useState([])
   const [ultimoReservaId, setUltimoReservaId] = useState(null)
@@ -103,7 +104,7 @@ export default function MisGuardias() {
     ? ruedaReserva
     : tecnicos.filter(t => puedeHacerGuardias(t) && t.id !== user.id).sort((a, b) => a.nombre.localeCompare(b.nombre))
 
-  const tipoLabel = { normal: 'Normal', festivo: '🏖 Festivo', navidad_nochebuena: '🎄 Nochebuena', navidad_navidad: '🎅 Navidad', navidad_reyes: '👑 Reyes' }
+  const tipoLabel = { normal: 'Normal', festivo: '🏖 Festivo', navidad_nochebuena: '🎄 Nochebuena', navidad_navidad: '🎅 Navidad', navidad_reyes: '👑 Reyes', navidad_anionuevo: '🥂 Año Nuevo' }
 
   return (
     <>
@@ -113,7 +114,7 @@ export default function MisGuardias() {
           <p>Tus semanas de guardia asignadas</p>
         </div>
         <select className="form-control" style={{ width: 'auto' }} value={anio} onChange={e => setAnio(+e.target.value)}>
-          {[2025, 2026, 2027].map(a => <option key={a}>{a}</option>)}
+          {Array.from({ length: new Date().getFullYear() - 2023 }, (_, i) => 2025 + i).map(a => <option key={a}>{a}</option>)}
         </select>
       </div>
 
