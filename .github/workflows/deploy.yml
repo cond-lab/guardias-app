@@ -38,6 +38,11 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
 
+      # GitHub Pages no conoce las rutas de React (/admin/guardias, /calendario...):
+      # al recargar daban 404. Con 404.html = index.html la app carga y abre la ruta.
+      - name: SPA fallback
+        run: cp dist/index.html dist/404.html
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 

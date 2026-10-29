@@ -33,6 +33,7 @@ export default function AdminGuardias() {
   const [generando, setGenerando] = useState(false)
   const [recalculando, setRecalculando] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [errorCarga, setErrorCarga] = useState(null)
   const [modalEditar, setModalEditar] = useState(null)
   const [tecnicoEdit, setTecnicoEdit] = useState('')
   const [notasEdit, setNotasEdit] = useState('')
@@ -41,10 +42,12 @@ export default function AdminGuardias() {
 
   async function cargar() {
     setLoading(true)
-    const [{ data: g }, { data: t }] = await Promise.all([
-      supabase.from('semanas_guardia').select('*, tecnicos(nombre)').eq('anio', anio).order('lunes_inicio'),
+    const [{ data: g, error: errG }, { data: t }] = await Promise.all([
+      supabase.from('semanas_guardia').select('*, tecnicos!tecnico_id(nombre)').eq('anio', anio).order('lunes_inicio'),
       supabase.from('tecnicos').select('*').order('orden_rueda_normal')
     ])
+    // Si falla la carga no se muestra "sin guardias" (dejaría generar el año otra vez)
+    setErrorCarga(errG ? errG.message : null)
     setGuardias(g || [])
     setTecnicos((t || []).filter(x => x.activo))
     if (g?.length) calcularEstadisticas(g, t || [])
@@ -73,6 +76,10 @@ export default function AdminGuardias() {
   async function generarGuardias() {
     setGenerando(true); setMsg(null)
     try {
+      const { count, error: errC } = await supabase.from('semanas_guardia').select('id', { count: 'exact', head: true }).eq('anio', anio)
+      if (errC) throw errC
+      if (count > 0) throw new Error(`${anio} ya tiene ${count} semanas generadas. Recarga la página.`)
+
       let semanas = getLunesDelAnio(anio)
       const desde = semanas[0].lunes_inicio
       const hasta = semanas[semanas.length - 1].lunes_fin
@@ -164,7 +171,7 @@ export default function AdminGuardias() {
       // Todas las semanas del año ordenadas
       const { data: todasSemanas } = await supabase
         .from('semanas_guardia')
-        .select('*, tecnicos(nombre)')
+        .select('*, tecnicos!tecnico_id(nombre)')
         .eq('anio', anio)
         .order('lunes_inicio')
 
@@ -299,7 +306,7 @@ export default function AdminGuardias() {
         <div className="card mb-4">
           <div className="card-header">Acciones</div>
           <div className="card-body flex gap-2" style={{ flexWrap: 'wrap' }}>
-            <button className="btn btn-primary" onClick={generarGuardias} disabled={generando || guardias.length > 0}>
+            <button className="btn btn-primary" onClick={generarGuardias} disabled={generando || loading || !!errorCarga || guardias.length > 0}>
               {generando ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Generando...</> : '⚡ Generar guardias'}
             </button>
             {guardias.length > 0 && (
@@ -371,6 +378,8 @@ export default function AdminGuardias() {
         {/* Tabla completa */}
         {loading ? (
           <div className="loading-center"><div className="spinner" /><span>Cargando guardias...</span></div>
+        ) : errorCarga ? (
+          <div className="alert alert-danger">No se han podido cargar las guardias de {anio}: {errorCarga}</div>
         ) : guardias.length === 0 ? (
           <div className="alert alert-info">No hay guardias para {anio}. Usa el botón "Generar guardias" para crear la rueda del año.</div>
         ) : (

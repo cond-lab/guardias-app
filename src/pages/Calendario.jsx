@@ -34,7 +34,7 @@ export default function Calendario() {
     setLoading(true)
     const { data } = await supabase
       .from('semanas_guardia')
-      .select('*, tecnicos(nombre)')
+      .select('*, tecnicos!tecnico_id(nombre)')
       .eq('anio', anio)
       .order('lunes_inicio')
     setGuardias(data || [])
