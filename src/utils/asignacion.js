@@ -112,12 +112,37 @@ export function asignarGuardias(semanas, tecnicos) {
 }
 
 /**
- * Obtiene el técnico que le toca en la rueda de sustitución
+ * Rueda de reserva (sustitución)
+ * Se guarda quién hizo la última reserva (rueda_punteros.ultimo_tecnico_id).
+ * El siguiente es el que va detrás de él en orden_rueda_sustitucion,
+ * saltando a los inactivos, a los que no hacen guardias y a quien solicita.
  */
-export function getTecnicoSustitucion(tecnicos, puntero) {
-  const activos = tecnicos
-    .filter(t => t.activo && t.rol !== 'admin' && t.hace_guardias !== false)
-    .sort((a, b) => (a.orden_rueda_sustitucion ?? a.orden_rueda_normal) - (b.orden_rueda_sustitucion ?? b.orden_rueda_normal))
-  if (!activos.length) return null
-  return activos[puntero % activos.length]
+const ordenSustitucion = t => t.orden_rueda_sustitucion ?? t.orden_rueda_normal ?? 0
+
+export const puedeHacerGuardias = t => t.activo && t.rol !== 'admin' && t.hace_guardias !== false
+
+// Todos los técnicos (también inactivos) en orden de la rueda de reserva
+function ruedaSustitucionCompleta(tecnicos) {
+  return tecnicos
+    .filter(t => t.rol !== 'admin')
+    .sort((a, b) => ordenSustitucion(a) - ordenSustitucion(b) || a.nombre.localeCompare(b.nombre))
+}
+
+/**
+ * Técnicos que pueden hacer la reserva, empezando por el que le toca.
+ * excluirId: el técnico que pide el cambio.
+ */
+export function ruedaReservaDesde(tecnicos, ultimoId, excluirId) {
+  const todos = ruedaSustitucionCompleta(tecnicos)
+  const inicio = todos.findIndex(t => t.id === ultimoId)
+  const lista = []
+  for (let k = 1; k <= todos.length; k++) {
+    const t = todos[(inicio + k + todos.length) % todos.length]
+    if (puedeHacerGuardias(t) && t.id !== excluirId) lista.push(t)
+  }
+  return lista
+}
+
+export function getSiguienteReserva(tecnicos, ultimoId, excluirId) {
+  return ruedaReservaDesde(tecnicos, ultimoId, excluirId)[0] || null
 }

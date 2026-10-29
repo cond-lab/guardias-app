@@ -12,6 +12,7 @@ export default function Solicitudes() {
   const [loading, setLoading] = useState(true)
   const [modalResolver, setModalResolver] = useState(null)
   const [respuesta, setRespuesta] = useState('')
+  const [tipoResolver, setTipoResolver] = useState('sustitucion')
   const [procesando, setProcesando] = useState(false)
   const [msg, setMsg] = useState(null)
 
@@ -42,39 +43,34 @@ export default function Solicitudes() {
     setProcesando(true); setMsg(null)
     try {
       const s = modalResolver
-      const anio = s.semanas_guardia?.anio || 2026
 
       if (estado === 'aprobada') {
         // Asignar la guardia al técnico receptor
-        await supabase
+        const { error: errSemana } = await supabase
           .from('semanas_guardia')
           .update({ tecnico_id: s.tecnico_receptor_id, estado: 'modificada' })
           .eq('id', s.semana_id)
+        if (errSemana) throw errSemana
 
-        // Si es sustitución, avanzar el puntero al siguiente del técnico receptor
-        if (s.tipo_cambio === 'sustitucion') {
-          // Obtener la rueda de sustitución ordenada
-          const { data: tecnicosRueda } = await supabase
-            .from('tecnicos')
-            .select('id, orden_rueda_sustitucion')
-            .eq('activo', true)
-            .neq('rol', 'admin')
-            .order('orden_rueda_sustitucion')
-
-          // Buscar posición del receptor en la rueda y apuntar al siguiente
-          const posReceptor = tecnicosRueda?.findIndex(t => t.id === s.tecnico_receptor_id) ?? -1
-          const nuevoPuntero = posReceptor >= 0 ? posReceptor + 1 : 0
-
-          await supabase
+        // Si es reserva, el receptor pasa a ser el último que ha hecho reserva:
+        // la próxima vez saldrá primero el siguiente a él en la rueda
+        if (tipoResolver === 'sustitucion') {
+          const { data: filas, error: errRueda } = await supabase
             .from('rueda_punteros')
-            .upsert({ tipo: 'sustitucion', anio, puntero: nuevoPuntero, updated_at: new Date().toISOString() })
+            .update({ ultimo_tecnico_id: s.tecnico_receptor_id, updated_at: new Date().toISOString() })
+            .eq('tipo', 'sustitucion')
+            .eq('anio', 0)
+            .select('id')
+          if (errRueda) throw errRueda
+          if (!filas?.length) throw new Error('No existe la rueda de reserva en la BD (falta ejecutar migracion_reserva.sql)')
         }
       }
 
-      await supabase
+      const { error: errSol } = await supabase
         .from('solicitudes_cambio')
-        .update({ estado, respuesta_admin: respuesta || null, updated_at: new Date().toISOString() })
+        .update({ estado, tipo_cambio: tipoResolver, respuesta_admin: respuesta || null, updated_at: new Date().toISOString() })
         .eq('id', s.id)
+      if (errSol) throw errSol
 
       setMsg({ tipo: 'success', texto: `Solicitud ${estado} correctamente` })
       setTimeout(() => { setModalResolver(null); setRespuesta(''); setMsg(null); cargar() }, 1500)
@@ -91,7 +87,7 @@ export default function Solicitudes() {
   }
 
   const tipoCambioLabel = (t) => {
-    if (t === 'sustitucion') return '🔄 Sustitución'
+    if (t === 'sustitucion') return '🔄 Reserva'
     if (t === 'intercambio') return '↔️ Intercambio'
     return t
   }
@@ -150,7 +146,7 @@ export default function Solicitudes() {
                       {isAdmin && (
                         <td>
                           {s.estado === 'pendiente' && (
-                            <button className="btn btn-outline btn-sm" onClick={() => { setModalResolver(s); setRespuesta(''); setMsg(null) }}>
+                            <button className="btn btn-outline btn-sm" onClick={() => { setModalResolver(s); setRespuesta(''); setTipoResolver(s.tipo_cambio === 'intercambio' ? 'intercambio' : 'sustitucion'); setMsg(null) }}>
                               Resolver
                             </button>
                           )}
@@ -187,11 +183,19 @@ export default function Solicitudes() {
                 <strong>Sustituto propuesto:</strong> {modalResolver.receptor?.nombre || '—'}<br />
                 <strong>Motivo:</strong> {modalResolver.motivo}
               </div>
-              {modalResolver.tipo_cambio === 'sustitucion' && (
-                <div className="alert alert-warning mb-3">
-                  ⚠️ Si apruebas, la guardia pasará a <strong>{modalResolver.receptor?.nombre}</strong> y la rueda de sustitución avanzará una posición.
-                </div>
-              )}
+              <div className="form-group">
+                <label className="form-label">Contar como</label>
+                <select className="form-control" value={tipoResolver} onChange={e => setTipoResolver(e.target.value)}>
+                  <option value="sustitucion">🔄 Reserva — mueve la rueda de reserva</option>
+                  <option value="intercambio">↔️ Intercambio entre compañeros — no mueve la rueda</option>
+                </select>
+              </div>
+              <div className="alert alert-warning mb-3">
+                ⚠️ Si apruebas, la guardia pasará a <strong>{modalResolver.receptor?.nombre}</strong>
+                {tipoResolver === 'sustitucion'
+                  ? <> y la próxima reserva empezará por el siguiente a {modalResolver.receptor?.nombre} en la rueda.</>
+                  : <>. La rueda de reserva no cambia.</>}
+              </div>
               <div className="form-group">
                 <label className="form-label">Respuesta / Comentario (opcional)</label>
                 <textarea

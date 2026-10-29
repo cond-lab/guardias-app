@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../context/AuthContext'
-import { getTecnicoSustitucion } from '../utils/asignacion'
+import { ruedaReservaDesde, puedeHacerGuardias } from '../utils/asignacion'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 
@@ -31,7 +31,7 @@ export default function MisGuardias() {
   const [anio, setAnio] = useState(2026)
   const [guardias, setGuardias] = useState([])
   const [tecnicos, setTecnicos] = useState([])
-  const [punteroSustitucion, setPunteroSustitucion] = useState(0)
+  const [ultimoReservaId, setUltimoReservaId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState({ tipo_cambio: 'sustitucion', tecnico_receptor_id: '', motivo: '' })
@@ -44,23 +44,26 @@ export default function MisGuardias() {
     setLoading(true)
     const [{ data: g }, { data: t }, { data: p }] = await Promise.all([
       supabase.from('semanas_guardia').select('*').eq('tecnico_id', user.id).eq('anio', anio).order('lunes_inicio'),
-      supabase.from('tecnicos').select('*').eq('activo', true).order('orden_rueda_sustitucion'),
-      supabase.from('rueda_punteros').select('puntero').eq('tipo', 'sustitucion').eq('anio', anio).single()
+      // Todos (también inactivos) para poder situar en la rueda al último que hizo reserva
+      supabase.from('tecnicos').select('id, nombre, rol, activo, hace_guardias, orden_rueda_normal, orden_rueda_sustitucion'),
+      // La rueda de reserva no depende del año: fila única con anio = 0
+      supabase.from('rueda_punteros').select('ultimo_tecnico_id').eq('tipo', 'sustitucion').eq('anio', 0).maybeSingle()
     ])
     setGuardias(g || [])
     setTecnicos(t || [])
-    setPunteroSustitucion(p?.puntero || 0)
+    setUltimoReservaId(p?.ultimo_tecnico_id || null)
     setLoading(false)
   }
 
   function abrirModal(semana) {
-    // Calcular quién le toca en la rueda de sustitución
-    const tecnicoTurno = getTecnicoSustitucion(tecnicos, punteroSustitucion)
-    // No preseleccionar al propio solicitante ni al que ya tiene esa guardia
-    const tecnicoPresel = (tecnicoTurno?.id !== user.id) ? tecnicoTurno?.id : ''
-    setForm({ tipo_cambio: 'sustitucion', tecnico_receptor_id: tecnicoPresel || '', motivo: '' })
+    // Preseleccionar al que le toca en la rueda de reserva (nunca el propio solicitante)
+    setForm({ tipo_cambio: 'sustitucion', tecnico_receptor_id: tecnicoEnTurno?.id || '', motivo: '' })
     setModal(semana)
     setMsg(null)
+  }
+
+  function cambiarTipo(tipo_cambio) {
+    setForm(p => ({ ...p, tipo_cambio, tecnico_receptor_id: tipo_cambio === 'sustitucion' ? (tecnicoEnTurno?.id || '') : '' }))
   }
 
   async function solicitarCambio() {
@@ -79,7 +82,7 @@ export default function MisGuardias() {
         semana_id: modal.id,
         tecnico_solicitante_id: user.id,
         tecnico_receptor_id: form.tecnico_receptor_id,
-        tipo_cambio: 'sustitucion',
+        tipo_cambio: form.tipo_cambio,
         motivo: form.motivo
       })
       if (error) throw error
@@ -92,15 +95,13 @@ export default function MisGuardias() {
     }
   }
 
-  // Técnico en turno de sustitución
-  const tecnicoEnTurno = getTecnicoSustitucion(tecnicos, punteroSustitucion)
-  const tecnicosSinYo = tecnicos.filter(t => t.id !== user.id && t.rol !== 'admin')
-  // Ordenar: el del turno primero, luego el resto
-  const tecnicosOrdenados = tecnicosSinYo.sort((a, b) => {
-    if (a.id === tecnicoEnTurno?.id) return -1
-    if (b.id === tecnicoEnTurno?.id) return 1
-    return (a.orden_rueda_sustitucion ?? 0) - (b.orden_rueda_sustitucion ?? 0)
-  })
+  // Rueda de reserva: empieza por el siguiente al último que hizo una reserva.
+  // Solo técnicos activos que hacen guardias, sin el propio solicitante.
+  const ruedaReserva = ruedaReservaDesde(tecnicos, ultimoReservaId, user.id)
+  const tecnicoEnTurno = ruedaReserva[0] || null
+  const tecnicosOrdenados = form.tipo_cambio === 'sustitucion'
+    ? ruedaReserva
+    : tecnicos.filter(t => puedeHacerGuardias(t) && t.id !== user.id).sort((a, b) => a.nombre.localeCompare(b.nombre))
 
   const tipoLabel = { normal: 'Normal', festivo: '🏖 Festivo', navidad_nochebuena: '🎄 Nochebuena', navidad_navidad: '🎅 Navidad', navidad_reyes: '👑 Reyes' }
 
@@ -143,8 +144,8 @@ export default function MisGuardias() {
             {/* Info rueda sustitución */}
             {tecnicoEnTurno && (
               <div className="alert alert-info mb-4">
-                <strong>Rueda de sustitución:</strong> El técnico en turno actualmente es <strong>{tecnicoEnTurno.nombre}</strong>.
-                Si solicitas un cambio, se le asignará a él por defecto (puedes cambiarlo).
+                <strong>Rueda de reserva:</strong> si pides una reserva, le toca a <strong>{tecnicoEnTurno.nombre}</strong>.
+                Sale seleccionado por defecto (puedes cambiarlo).
               </div>
             )}
 
@@ -214,7 +215,30 @@ export default function MisGuardias() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Técnico sustituto</label>
+                <label className="form-label">Tipo de cambio</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${form.tipo_cambio === 'sustitucion' ? 'btn-primary' : 'btn-outline'}`}
+                    aria-pressed={form.tipo_cambio === 'sustitucion'}
+                    onClick={() => cambiarTipo('sustitucion')}
+                  >🔄 Reserva</button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${form.tipo_cambio === 'intercambio' ? 'btn-primary' : 'btn-outline'}`}
+                    aria-pressed={form.tipo_cambio === 'intercambio'}
+                    onClick={() => cambiarTipo('intercambio')}
+                  >↔️ Intercambio</button>
+                </div>
+                <div className="text-sm text-muted" style={{ marginTop: 5 }}>
+                  {form.tipo_cambio === 'sustitucion'
+                    ? 'La hace otro técnico por la rueda de reserva. La rueda avanza.'
+                    : 'Te cambias la guardia con un compañero. No mueve la rueda de reserva.'}
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">{form.tipo_cambio === 'sustitucion' ? 'Técnico de reserva' : 'Compañero'}</label>
                 <select
                   className="form-control"
                   value={form.tecnico_receptor_id}
@@ -223,13 +247,13 @@ export default function MisGuardias() {
                   <option value="">— Selecciona técnico —</option>
                   {tecnicosOrdenados.map(t => (
                     <option key={t.id} value={t.id}>
-                      {t.nombre}{t.id === tecnicoEnTurno?.id ? ' ← Le toca por turno' : ''}
+                      {t.nombre}{form.tipo_cambio === 'sustitucion' && t.id === tecnicoEnTurno?.id ? ' ← Le toca por turno' : ''}
                     </option>
                   ))}
                 </select>
-                {tecnicoEnTurno && (
+                {form.tipo_cambio === 'sustitucion' && tecnicoEnTurno && (
                   <div className="text-sm text-muted mt-3" style={{ marginTop: 5 }}>
-                    Por turno de sustitución le corresponde a <strong>{tecnicoEnTurno.nombre}</strong>
+                    Por la rueda de reserva le corresponde a <strong>{tecnicoEnTurno.nombre}</strong>
                   </div>
                 )}
               </div>

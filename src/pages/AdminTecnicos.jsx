@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import { getSiguienteReserva } from '../utils/asignacion'
 
 const FORM_VACIO = { nombre: '', email: '', pin: '', rol: 'tecnico', orden_rueda_normal: 0, orden_rueda_festivo: 0, orden_rueda_navidad: 0, orden_rueda_sustitucion: 0, hace_guardias: true }
 
@@ -14,7 +15,7 @@ const NAVIDAD_LABELS = ['🎄 Nochebuena', '🎅 Navidad', '👑 Reyes']
 
 export default function AdminTecnicos() {
   const [tecnicos, setTecnicos] = useState([])
-  const [punteroSust, setPunteroSust] = useState(0)
+  const [ultimoReservaId, setUltimoReservaId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState(FORM_VACIO)
@@ -28,10 +29,10 @@ export default function AdminTecnicos() {
     setLoading(true)
     const [{ data: t }, { data: p }] = await Promise.all([
       supabase.from('tecnicos').select('*').order('orden_rueda_normal'),
-      supabase.from('rueda_punteros').select('puntero').eq('tipo', 'sustitucion').eq('anio', 2026).single()
+      supabase.from('rueda_punteros').select('ultimo_tecnico_id').eq('tipo', 'sustitucion').eq('anio', 0).maybeSingle()
     ])
     setTecnicos(t || [])
-    setPunteroSust(p?.puntero || 0)
+    setUltimoReservaId(p?.ultimo_tecnico_id || null)
     setLoading(false)
   }
 
@@ -81,21 +82,15 @@ export default function AdminTecnicos() {
     cargar()
   }
 
-  async function resetearPuntero() {
-    if (!window.confirm('¿Resetear el puntero de la rueda de sustitución a 0?')) return
-    await supabase.from('rueda_punteros').upsert({ tipo: 'sustitucion', anio: 2026, puntero: 0, updated_at: new Date().toISOString() })
-    setPunteroSust(0)
-  }
-
   const tecnicosPorRueda = (campo) =>
     tecnicos.filter(t => t.rol !== 'admin' && t.activo && t.hace_guardias !== false).sort((a, b) => (a[campo] ?? 0) - (b[campo] ?? 0))
 
   const ruedaActual = RUEDAS.find(r => r.key === ruedaActiva)
   const listaTecnicos = tecnicosPorRueda(ruedaActiva)
 
-  // Calcular quién es el siguiente en sustitución
-  const tecnicosSust = tecnicosPorRueda('orden_rueda_sustitucion')
-  const tecnicoEnTurno = tecnicosSust.length ? tecnicosSust[punteroSust % tecnicosSust.length] : null
+  // Quién hizo la última reserva y a quién le toca la próxima
+  const ultimoReserva = tecnicos.find(t => t.id === ultimoReservaId) || null
+  const tecnicoEnTurno = getSiguienteReserva(tecnicos, ultimoReservaId)
 
   return (
     <>
@@ -134,14 +129,11 @@ export default function AdminTecnicos() {
               </div>
             )}
             {ruedaActiva === 'orden_rueda_sustitucion' && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 0' }}>
-                <div className="alert alert-info" style={{ margin: 0, flex: 1 }}>
-                  <strong>Turno actual:</strong> {tecnicoEnTurno ? <strong> {tecnicoEnTurno.nombre}</strong> : ' —'}
-                  <span className="text-muted" style={{ marginLeft: 8 }}>(puntero: {punteroSust})</span>
-                </div>
-                <button className="btn btn-warning btn-sm" style={{ marginLeft: 12 }} onClick={resetearPuntero}>
-                  ↺ Resetear puntero
-                </button>
+              <div className="alert alert-info" style={{ margin: '12px 16px 0' }}>
+                <strong>Próxima reserva:</strong> {tecnicoEnTurno ? <strong> {tecnicoEnTurno.nombre}</strong> : ' —'}
+                <span className="text-muted" style={{ marginLeft: 8 }}>
+                  (última hecha por {ultimoReserva?.nombre || '—'})
+                </span>
               </div>
             )}
 
