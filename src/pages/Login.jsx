@@ -58,9 +58,14 @@ export default function Login() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-logo">
-          <div style={{ fontSize: 40, marginBottom: 8 }}>🗓</div>
+          <div className="login-marca">Electromedicina</div>
           <h1>Guardias</h1>
           <p>{fase === 'login' ? 'Sistema de Gestión de Rueda' : 'Establece tu PIN personal'}</p>
+          <div className="login-bandas" aria-hidden="true">
+            <span style={{ background: 'var(--normal)' }} />
+            <span style={{ background: 'var(--festivo)' }} />
+            <span style={{ background: 'var(--navidad)' }} />
+          </div>
         </div>
 
         {fase === 'login' ? (

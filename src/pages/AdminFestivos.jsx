@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import { useConfirmar } from '../components/Confirmar'
+import SelectorAnio, { ANIO_ACTUAL } from '../components/SelectorAnio'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 
 const FORM_VACIO = { fecha: '', nombre: '', tipo: 'nacional', anio: new Date().getFullYear() }
 
 export default function AdminFestivos() {
-  const [anio, setAnio] = useState(new Date().getFullYear())
+  const confirmar = useConfirmar()
+  const [anio, setAnio] = useState(ANIO_ACTUAL)
   const [festivos, setFestivos] = useState([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)
@@ -47,7 +50,7 @@ export default function AdminFestivos() {
   }
 
   async function eliminar(id) {
-    if (!window.confirm('¿Eliminar este festivo?')) return
+    if (!(await confirmar('¿Eliminar este festivo?', { titulo: 'Eliminar festivo', boton: 'Eliminar', peligro: true }))) return
     await supabase.from('festivos').delete().eq('id', id)
     cargar()
   }
@@ -63,9 +66,7 @@ export default function AdminFestivos() {
           <p>Festivos nacionales, locales y días especiales de Navidad</p>
         </div>
         <div className="flex gap-2">
-          <select className="form-control" style={{ width: 'auto' }} value={anio} onChange={e => setAnio(+e.target.value)}>
-            {Array.from({ length: new Date().getFullYear() - 2023 }, (_, i) => 2025 + i).map(a => <option key={a}>{a}</option>)}
-          </select>
+          <SelectorAnio value={anio} onChange={setAnio} />
           <button className="btn btn-primary" onClick={abrirNuevo}>+ Añadir festivo</button>
         </div>
       </div>

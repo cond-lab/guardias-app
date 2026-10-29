@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
+import { ConfirmarProvider } from './components/Confirmar'
 import Login from './pages/Login'
 import Conductivos from './pages/Conductivos'
 import Calendario from './pages/Calendario'
@@ -42,7 +43,9 @@ export default function App() {
   return (
     <BrowserRouter basename="/guardias-app">
       <AuthProvider>
-        <AppRoutes />
+        <ConfirmarProvider>
+          <AppRoutes />
+        </ConfirmarProvider>
       </AuthProvider>
     </BrowserRouter>
   )

@@ -35,8 +35,8 @@ export default function Layout() {
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <h1>🗓 Guardias</h1>
-          <p>Sistema de Rueda</p>
+          <h1>Guardias</h1>
+          <p>Electromedicina · Rueda</p>
         </div>
         <nav className="sidebar-nav">
           <div className="nav-section">General</div>
@@ -68,12 +68,16 @@ export default function Layout() {
           )}
         </nav>
         <div className="sidebar-footer">
-          <div className="user-name">{user?.nombre}</div>
-          <div className="user-rol">{user?.rol === 'admin' ? 'Administrador' : 'Técnico'}</div>
-          <button className="btn-logout" style={{ marginTop: 6 }} onClick={() => { setModalPin(true); setPinMsg(null); setPinNuevo(''); setPinNuevo2('') }}>
-            🔑 Cambiar PIN
-          </button>
-          <button className="btn-logout" onClick={handleLogout}>Cerrar sesión</button>
+          <div>
+            <div className="user-name">{user?.nombre}</div>
+            <div className="user-rol">{user?.rol === 'admin' ? 'Administrador' : 'Técnico'}</div>
+          </div>
+          <div className="sidebar-acciones">
+            <button className="btn-logout" onClick={() => { setModalPin(true); setPinMsg(null); setPinNuevo(''); setPinNuevo2('') }}>
+              🔑 Cambiar PIN
+            </button>
+            <button className="btn-logout" onClick={handleLogout}>Cerrar sesión</button>
+          </div>
         </div>
       </aside>
 

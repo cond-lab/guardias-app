@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import { useConfirmar } from '../components/Confirmar'
+import SelectorAnio, { ANIO_ACTUAL } from '../components/SelectorAnio'
 import { getLunesDelAnio, marcarFestivos, asignarGuardias, ultimosDeRueda, calcularSaldoNormal, tecnicoOriginal, puedeHacerGuardias } from '../utils/asignacion'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -9,8 +11,6 @@ import autoTable from 'jspdf-autotable'
 
 function formatFecha(f) { return format(parseISO(f), "d MMM yyyy", { locale: es }) }
 
-const ANIO_ACTUAL = new Date().getFullYear()
-const ANIOS = Array.from({ length: ANIO_ACTUAL - 2025 + 2 }, (_, i) => 2025 + i)
 
 // Semanas ya asignadas antes de una fecha (de cualquier año), para continuar las ruedas
 async function historialAntesDe(fecha) {
@@ -25,6 +25,7 @@ async function historialAntesDe(fecha) {
 }
 
 export default function AdminGuardias() {
+  const confirmar = useConfirmar()
   const [anio, setAnio] = useState(ANIO_ACTUAL)
   const [guardias, setGuardias] = useState([])
   const [tecnicos, setTecnicos] = useState([])
@@ -99,11 +100,12 @@ export default function AdminGuardias() {
       const nombre = id => tecnicosDB.find(t => t.id === id)?.nombre || '—'
       const compensa = Object.entries(saldoNormal)
         .map(([id, v]) => `• ${nombre(id)}: ${v < 0 ? `+${-v} (le faltan)` : `−${v} (le sobran)`}`)
-      if (!window.confirm(
+      if (!(await confirmar(
         `¿Generar guardias para ${anio}? Se crearán todas las semanas del año.\n\n` +
         `Las ruedas continúan tras:\n• Normal: ${nombre(ultimos.normal)}\n• Festivo: ${nombre(ultimos.festivo)}\n• Navidad: ${nombre(ultimos.navidad)}\n\n` +
-        (compensa.length ? `Compensación de normales de ${anio - 1}:\n${compensa.join('\n')}` : `Sin compensación de ${anio - 1}.`)
-      )) return
+        (compensa.length ? `Compensación de normales de ${anio - 1}:\n${compensa.join('\n')}` : `Sin compensación de ${anio - 1}.`),
+        { titulo: `Generar guardias ${anio}`, boton: 'Generar' }
+      ))) return
 
       semanas = marcarFestivos(semanas, festivosDB || [])
       const { semanas: asignadas } = asignarGuardias(semanas, tecnicosDB, { ultimos, saldoNormal })
@@ -133,7 +135,7 @@ export default function AdminGuardias() {
   }
 
   async function eliminarAnio() {
-    if (!window.confirm(`¿Eliminar TODAS las guardias de ${anio}? Esta acción no se puede deshacer.`)) return
+    if (!(await confirmar(`Se borrarán TODAS las guardias de ${anio}. Esta acción no se puede deshacer.`, { titulo: `Eliminar ${anio}`, boton: `Eliminar ${anio}`, peligro: true }))) return
     await supabase.from('semanas_guardia').delete().eq('anio', anio)
     setMsg({ tipo: 'warning', texto: `Guardias de ${anio} eliminadas` })
     cargar()
@@ -160,9 +162,10 @@ export default function AdminGuardias() {
    * 3. Recalculamos y actualizamos en BD solo las semanas posteriores
    */
   async function recalcularDesde(semanaEditada) {
-    if (!window.confirm(
-      `¿Recalcular todas las semanas siguientes a partir del ${formatFecha(semanaEditada.lunes_fin)}?\n\nEsto reasignará automáticamente todas las semanas posteriores respetando la rueda.`
-    )) return
+    if (!(await confirmar(
+      `¿Recalcular todas las semanas siguientes a partir del ${formatFecha(semanaEditada.lunes_fin)}?\n\nEsto reasignará automáticamente todas las semanas posteriores respetando la rueda.`,
+      { titulo: 'Recalcular semanas', boton: 'Recalcular' }
+    ))) return
 
     setRecalculando(true); setMsg(null)
     try {
@@ -287,9 +290,7 @@ export default function AdminGuardias() {
           <p>Generación y administración de guardias</p>
         </div>
         <div className="flex gap-2">
-          <select className="form-control" style={{ width: 'auto' }} value={anio} onChange={e => setAnio(+e.target.value)}>
-            {ANIOS.map(a => <option key={a}>{a}</option>)}
-          </select>
+          <SelectorAnio value={anio} onChange={setAnio} />
         </div>
       </div>
 

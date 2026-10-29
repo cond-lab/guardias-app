@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import { useConfirmar } from '../components/Confirmar'
 import { useAuth } from '../context/AuthContext'
 import { format, parseISO, isWithinInterval, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -10,6 +11,7 @@ function formatDia(f) { return format(parseISO(f), "d 'de' MMMM yyyy", { locale:
 const FORM_VACIO = { servicio_id: '', fecha_inicio: '', fecha_fin: '', notas: '', tecnicos_ids: [] }
 
 export default function Conductivos() {
+  const confirmar = useConfirmar()
   const { isAdmin } = useAuth()
   const [conductivos, setConductivos] = useState([])
   const [servicios, setServicios] = useState([])
@@ -122,7 +124,7 @@ export default function Conductivos() {
   }
 
   async function eliminar(id) {
-    if (!window.confirm('¿Eliminar este conductivo?')) return
+    if (!(await confirmar('¿Eliminar este conductivo?', { titulo: 'Eliminar conductivo', boton: 'Eliminar', peligro: true }))) return
     await supabase.from('conductivos').delete().eq('id', id)
     cargar()
   }
@@ -303,7 +305,7 @@ export default function Conductivos() {
                       minHeight: 80, padding: '4px 6px',
                       borderRight: '1px solid var(--gris-2)',
                       borderBottom: '1px solid var(--gris-2)',
-                      background: esHoy ? 'var(--azul-claro)' : 'white'
+                      background: esHoy ? 'var(--azul-claro)' : 'var(--blanco)'
                     }}>
                       <div style={{
                         fontSize: 12, fontWeight: esHoy ? 700 : 400,
@@ -366,7 +368,7 @@ export default function Conductivos() {
                       display: 'flex', alignItems: 'center', gap: 8,
                       padding: '6px 10px', borderRadius: 'var(--radio)',
                       border: `1px solid ${form.tecnicos_ids.includes(t.id) ? 'var(--azul)' : 'var(--gris-3)'}`,
-                      background: form.tecnicos_ids.includes(t.id) ? 'var(--azul-claro)' : 'white',
+                      background: form.tecnicos_ids.includes(t.id) ? 'var(--azul-claro)' : 'var(--blanco)',
                       cursor: 'pointer', fontSize: 13, userSelect: 'none'
                     }}>
                       <input
@@ -418,7 +420,7 @@ export default function Conductivos() {
                       setModalServicio(s)
                     }}>✏️</button>
                     <button className="btn btn-danger btn-icon btn-sm" onClick={async () => {
-                      if (!window.confirm('¿Eliminar este servicio?')) return
+                      if (!(await confirmar('¿Eliminar este servicio?', { titulo: 'Eliminar servicio', boton: 'Eliminar', peligro: true }))) return
                       await supabase.from('servicios').update({ activo: false }).eq('id', s.id)
                       cargar()
                     }}>🗑</button>

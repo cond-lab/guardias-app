@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import SelectorAnio, { ANIO_ACTUAL } from '../components/SelectorAnio'
 import { useAuth } from '../context/AuthContext'
 import { ruedaReservaDesde, puedeHacerGuardias } from '../utils/asignacion'
 import { format, parseISO } from 'date-fns'
@@ -29,7 +30,7 @@ function abrirEnGoogleCalendar(guardia, nombreTecnico) {
 
 export default function MisGuardias() {
   const { user } = useAuth()
-  const [anio, setAnio] = useState(new Date().getFullYear())
+  const [anio, setAnio] = useState(ANIO_ACTUAL)
   const [guardias, setGuardias] = useState([])
   const [tecnicos, setTecnicos] = useState([])
   const [ultimoReservaId, setUltimoReservaId] = useState(null)
@@ -113,9 +114,7 @@ export default function MisGuardias() {
           <h2>Mis Guardias</h2>
           <p>Tus semanas de guardia asignadas</p>
         </div>
-        <select className="form-control" style={{ width: 'auto' }} value={anio} onChange={e => setAnio(+e.target.value)}>
-          {Array.from({ length: new Date().getFullYear() - 2023 }, (_, i) => 2025 + i).map(a => <option key={a}>{a}</option>)}
-        </select>
+        <SelectorAnio value={anio} onChange={setAnio} />
       </div>
 
       <div className="page-body">

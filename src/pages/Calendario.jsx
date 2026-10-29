@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
+import SelectorAnio, { ANIO_ACTUAL } from '../components/SelectorAnio'
 import { useAuth } from '../context/AuthContext'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -23,7 +24,7 @@ function formatRango(inicio, fin) {
 
 export default function Calendario() {
   const { user } = useAuth()
-  const [anio, setAnio] = useState(new Date().getFullYear())
+  const [anio, setAnio] = useState(ANIO_ACTUAL)
   const [guardias, setGuardias] = useState([])
   const [loading, setLoading] = useState(true)
   const [filtro, setFiltro] = useState('todas') // 'todas' | 'festivos' | 'navidad' | 'mias'
@@ -64,9 +65,7 @@ export default function Calendario() {
           <p>Vista anual de la rueda de guardias</p>
         </div>
         <div className="flex gap-2">
-          <select className="form-control" style={{ width: 'auto' }} value={anio} onChange={e => setAnio(+e.target.value)}>
-            {Array.from({ length: new Date().getFullYear() - 2023 }, (_, i) => 2025 + i).map(a => <option key={a}>{a}</option>)}
-          </select>
+          <SelectorAnio value={anio} onChange={setAnio} />
         </div>
       </div>
 
@@ -110,7 +109,10 @@ export default function Calendario() {
               if (!sems.length) return null
               return (
                 <div key={mes} className="card cal-mes">
-                  <div className="cal-mes-titulo">{MESES[mes]}</div>
+                  <div className="cal-mes-titulo">
+                    {MESES[mes]}
+                    <span className="font-mono text-muted" style={{ fontSize: 11, fontWeight: 500, letterSpacing: 0 }}>{sems.length} sem.</span>
+                  </div>
                   {sems.map(g => (
                     <div key={g.id} className={`cal-semana tipo-${g.tipo?.startsWith('navidad') ? 'navidad' : g.tipo} ${g.tecnico_id === user.id ? 'mi-guardia' : ''}`}>
                       <div className="cal-fechas">
@@ -122,7 +124,7 @@ export default function Calendario() {
                       </div>
                       <div className={`cal-tecnico ${!g.tecnicos ? 'sin-asignar' : ''}`}>
                         {g.tecnicos?.nombre || 'Sin asignar'}
-                        {g.tecnico_id === user.id && <div style={{ fontSize: 10, color: '#2B6CB0' }}>← Tú</div>}
+                        {g.tecnico_id === user.id && <div><span className="cal-tu">Tú</span></div>}
                       </div>
                     </div>
                   ))}
