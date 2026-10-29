@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../services/supabase'
-import { getLunesDelAnio, marcarFestivos, asignarGuardias, ultimosDeRueda, calcularSaldoNormal, tecnicoOriginal } from '../utils/asignacion'
+import { getLunesDelAnio, marcarFestivos, asignarGuardias, ultimosDeRueda, calcularSaldoNormal, tecnicoOriginal, puedeHacerGuardias } from '../utils/asignacion'
 import { format, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import * as XLSX from 'xlsx'
@@ -43,20 +43,23 @@ export default function AdminGuardias() {
     setLoading(true)
     const [{ data: g }, { data: t }] = await Promise.all([
       supabase.from('semanas_guardia').select('*, tecnicos(nombre)').eq('anio', anio).order('lunes_inicio'),
-      supabase.from('tecnicos').select('*').eq('activo', true).order('orden_rueda_normal')
+      supabase.from('tecnicos').select('*').order('orden_rueda_normal')
     ])
     setGuardias(g || [])
-    setTecnicos(t || [])
+    setTecnicos((t || []).filter(x => x.activo))
     if (g?.length) calcularEstadisticas(g, t || [])
     setLoading(false)
   }
 
   function calcularEstadisticas(gs, ts) {
-    // Cuentan las que le tocaron a cada uno; las hechas como reserva van aparte
-    const stats = ts.filter(t => t.rol !== 'admin' && t.hace_guardias !== false).map(t => {
+    // Cuentan las que le tocaron a cada uno; las hechas como reserva van aparte.
+    // Los de baja o fuera de guardias salen solo si tienen semanas ese año.
+    const tieneSemanas = t => gs.some(g => g.tecnico_id === t.id || tecnicoOriginal(g) === t.id)
+    const stats = ts.filter(t => t.rol !== 'admin' && (puedeHacerGuardias(t) || tieneSemanas(t))).map(t => {
       const suyas = gs.filter(g => tecnicoOriginal(g) === t.id)
       return {
         nombre: t.nombre,
+        estado: !t.activo ? 'Baja' : t.hace_guardias === false ? 'Fuera de guardias' : null,
         normal: suyas.filter(g => g.tipo === 'normal').length,
         festivo: suyas.filter(g => g.tipo === 'festivo').length,
         navidad: suyas.filter(g => g.tipo?.startsWith('navidad')).length,
@@ -64,7 +67,7 @@ export default function AdminGuardias() {
         reserva: gs.filter(g => g.tecnico_id === t.id && tecnicoOriginal(g) !== t.id).length,
       }
     })
-    setEstadisticas(stats.sort((a, b) => b.total - a.total))
+    setEstadisticas(stats.sort((a, b) => !!a.estado - !!b.estado || b.total - a.total))
   }
 
   async function generarGuardias() {
@@ -341,8 +344,11 @@ export default function AdminGuardias() {
                     const maxTotal = Math.max(...estadisticas.map(x => x.total))
                     const pct = maxTotal ? Math.round((s.total / maxTotal) * 100) : 0
                     return (
-                      <tr key={s.nombre}>
-                        <td><strong>{s.nombre}</strong></td>
+                      <tr key={s.nombre} style={s.estado ? { opacity: 0.6 } : undefined}>
+                        <td>
+                          <strong>{s.nombre}</strong>
+                          {s.estado && <span className="badge badge-rechazada" style={{ marginLeft: 8 }}>{s.estado}</span>}
+                        </td>
                         <td className="font-mono">{s.normal}</td>
                         <td className="font-mono">{s.festivo}</td>
                         <td className="font-mono">{s.navidad}</td>
