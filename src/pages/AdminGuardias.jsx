@@ -38,11 +38,14 @@ export default function AdminGuardias() {
   const [modalEditar, setModalEditar] = useState(null)
   const [tecnicoEdit, setTecnicoEdit] = useState('')
   const [notasEdit, setNotasEdit] = useState('')
+  const [modalGenerar, setModalGenerar] = useState(null)
 
   useEffect(() => { cargar() }, [anio])
 
   async function cargar() {
     setLoading(true)
+    // Vaciar al cambiar de año para no mostrar un momento los datos del año anterior
+    setGuardias([]); setEstadisticas([])
     const [{ data: g, error: errG }, { data: t }] = await Promise.all([
       supabase.from('semanas_guardia').select('*, tecnicos!tecnico_id(nombre)').eq('anio', anio).order('lunes_inicio'),
       supabase.from('tecnicos').select('*').order('orden_rueda_normal')
@@ -52,6 +55,7 @@ export default function AdminGuardias() {
     setGuardias(g || [])
     setTecnicos((t || []).filter(x => x.activo))
     if (g?.length) calcularEstadisticas(g, t || [])
+    else setEstadisticas([])
     setLoading(false)
   }
 
@@ -95,19 +99,27 @@ export default function AdminGuardias() {
 
       const historial = await historialAntesDe(desde)
       const ultimos = ultimosDeRueda(historial)
-      const saldoNormal = calcularSaldoNormal(historial.filter(s => s.anio === anio - 1), tecnicosDB)
+      const saldo = calcularSaldoNormal(historial.filter(s => s.anio === anio - 1), tecnicosDB)
 
-      const nombre = id => tecnicosDB.find(t => t.id === id)?.nombre || '—'
-      const compensa = Object.entries(saldoNormal)
-        .map(([id, v]) => `• ${nombre(id)}: ${v < 0 ? `+${-v} (le faltan)` : `−${v} (le sobran)`}`)
-      if (!(await confirmar(
-        `¿Generar guardias para ${anio}? Se crearán todas las semanas del año.\n\n` +
-        `Las ruedas continúan tras:\n• Normal: ${nombre(ultimos.normal)}\n• Festivo: ${nombre(ultimos.festivo)}\n• Navidad: ${nombre(ultimos.navidad)}\n\n` +
-        (compensa.length ? `Compensación de normales de ${anio - 1}:\n${compensa.join('\n')}` : `Sin compensación de ${anio - 1}.`),
-        { titulo: `Generar guardias ${anio}`, boton: 'Generar' }
-      ))) return
+      // La compensación calculada se puede ajustar a mano antes de generar
+      // (extra > 0: semanas normales de más; extra < 0: turnos que se salta)
+      const filas = tecnicosDB.filter(puedeHacerGuardias)
+        .sort((a, b) => (a.orden_rueda_normal ?? 0) - (b.orden_rueda_normal ?? 0) || a.nombre.localeCompare(b.nombre))
+        .map(t => ({ id: t.id, nombre: t.nombre, calculado: -(saldo[t.id] || 0), extra: -(saldo[t.id] || 0) }))
+      setModalGenerar({ anio, semanas, festivosDB: festivosDB || [], tecnicosDB, ultimos, filas })
+    } catch (err) {
+      setMsg({ tipo: 'danger', texto: err.message })
+    } finally {
+      setGenerando(false)
+    }
+  }
 
-      semanas = marcarFestivos(semanas, festivosDB || [])
+  async function confirmarGeneracion() {
+    const { anio, festivosDB, tecnicosDB, ultimos, filas } = modalGenerar
+    setGenerando(true); setMsg(null)
+    try {
+      const saldoNormal = Object.fromEntries(filas.filter(f => f.extra).map(f => [f.id, -f.extra]))
+      const semanas = marcarFestivos(getLunesDelAnio(anio), festivosDB)
       const { semanas: asignadas } = asignarGuardias(semanas, tecnicosDB, { ultimos, saldoNormal })
 
       const rows = asignadas.map(s => ({
@@ -123,8 +135,13 @@ export default function AdminGuardias() {
         festivo_nombre: s.festivos_en_semana?.join(', ') || null,
       }))
 
+      const { count, error: errC } = await supabase.from('semanas_guardia').select('id', { count: 'exact', head: true }).eq('anio', anio)
+      if (errC) throw errC
+      if (count > 0) throw new Error(`${anio} ya tiene ${count} semanas generadas. Recarga la página.`)
+
       const { error } = await supabase.from('semanas_guardia').insert(rows)
       if (error) throw error
+      setModalGenerar(null)
       setMsg({ tipo: 'success', texto: `✓ ${rows.length} semanas generadas para ${anio}` })
       cargar()
     } catch (err) {
@@ -444,6 +461,63 @@ export default function AdminGuardias() {
           </div>
         )}
       </div>
+
+      {/* Modal generar año */}
+      {modalGenerar && (() => {
+        const nombre = id => modalGenerar.tecnicosDB.find(t => t.id === id)?.nombre || '—'
+        const cambiar = (id, extra) => setModalGenerar(m => ({ ...m, filas: m.filas.map(f => f.id === id ? { ...f, extra } : f) }))
+        return (
+          <div className="modal-overlay" onClick={e => e.target === e.currentTarget && !generando && setModalGenerar(null)}>
+            <div className="modal" style={{ maxWidth: 560 }}>
+              <div className="modal-header">
+                <span>Generar guardias {modalGenerar.anio}</span>
+                <button className="btn btn-outline btn-icon btn-sm" onClick={() => setModalGenerar(null)} disabled={generando}>✕</button>
+              </div>
+              <div className="modal-body">
+                <div className="alert alert-info mb-3">
+                  Se crearán todas las semanas de {modalGenerar.anio}. Las ruedas continúan tras:
+                  <strong> Normal</strong> {nombre(modalGenerar.ultimos.normal)} ·
+                  <strong> Festivo</strong> {nombre(modalGenerar.ultimos.festivo)} ·
+                  <strong> Navidad</strong> {nombre(modalGenerar.ultimos.navidad)}
+                </div>
+                <div className="form-label">Compensación de guardias normales de {modalGenerar.anio - 1}</div>
+                <div className="text-sm text-muted mb-3">
+                  <strong>+1</strong> = una semana normal más al principio del año · <strong>−1</strong> = se salta un turno · <strong>0</strong> = nada.
+                  Viene calculado según las que le tocaron en {modalGenerar.anio - 1}; puedes cambiarlo.
+                </div>
+                <div className="table-wrap mb-3">
+                  <table>
+                    <thead><tr><th>Técnico</th><th>Calculado</th><th>Aplicar</th></tr></thead>
+                    <tbody>
+                      {modalGenerar.filas.map(f => (
+                        <tr key={f.id}>
+                          <td><strong>{f.nombre}</strong></td>
+                          <td className="font-mono text-muted">{f.calculado > 0 ? `+${f.calculado}` : f.calculado < 0 ? `−${-f.calculado}` : '0'}</td>
+                          <td>
+                            <div className="flex gap-2" style={{ alignItems: 'center' }}>
+                              <button type="button" className="btn btn-outline btn-icon btn-sm" aria-label={`Restar a ${f.nombre}`} onClick={() => cambiar(f.id, Math.max(-5, f.extra - 1))}>−</button>
+                              <span className="font-mono" style={{ minWidth: 28, textAlign: 'center', fontWeight: 600, color: f.extra > 0 ? 'var(--ok)' : f.extra < 0 ? 'var(--festivo)' : 'var(--texto-2)' }}>
+                                {f.extra > 0 ? `+${f.extra}` : f.extra < 0 ? `−${-f.extra}` : '0'}
+                              </span>
+                              <button type="button" className="btn btn-outline btn-icon btn-sm" aria-label={`Sumar a ${f.nombre}`} onClick={() => cambiar(f.id, Math.min(5, f.extra + 1))}>+</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-outline" onClick={() => setModalGenerar(null)} disabled={generando}>Cancelar</button>
+                <button className="btn btn-primary" onClick={confirmarGeneracion} disabled={generando}>
+                  {generando ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Generando...</> : `⚡ Generar ${modalGenerar.anio}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Modal editar guardia */}
       {modalEditar && (
